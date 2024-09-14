@@ -14,6 +14,7 @@
     "vue": "^3.4.29"
   },
   "devDependencies": {
+    "@arco-design/web-vue": "^2.56.2",
     "@vitejs/plugin-vue": "^5.0.5",
     "vite": "^5.3.1"
   }
