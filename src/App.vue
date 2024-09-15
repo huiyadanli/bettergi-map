@@ -24,6 +24,7 @@ onMounted(() => {
 });
 
 function initMap() {
+
   map.value = L.map('map', {
     attributionControl: false,
     crs: L.CRS.Simple,
@@ -50,7 +51,7 @@ function initMap() {
     editMode: true,
     dragMode: false,
     cutPolygon: false,
-    removalMode: true,
+    removalMode: false,
     rotateMode: false,
   });
 
@@ -94,6 +95,7 @@ function addPolyline(layer, name = "未命名路径") {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  selectPolyline(selectedPolylineIndex.value);
 }
 
 // 添加重命名函数
@@ -133,13 +135,16 @@ function importPositions() {
           y: convertedPos.y
         };
       });
-      const latlngs = positions.map(pos => [pos.y, pos.x]);
+      const latlngs = positions.map(pos => L.latLng(pos.y, pos.x));
       const layer = L.polyline(latlngs, {
         color: 'red',
         weight: 3
       }).addTo(map.value);
       layer.on("pm:edit", handleMapPointChange);
       addPolyline(layer, data.info.name);
+      
+      // 选中新导入的路径
+      selectPolyline(polylines.value.length - 1);
     };
     reader.readAsText(file);
   };
@@ -220,7 +225,15 @@ function handleChange(newData) {
   }));
 
   // 更新地图上的折线
-  const latlngs = newData.map(pos => [pos.y, pos.x]);
+  const latlngs = newData.map(pos => L.latLng(pos.y, pos.x));
+  polyline.layer.setLatLngs(latlngs);
+}
+
+// 添加删除点位的函数
+function deletePosition(index) {
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  polyline.positions.splice(index, 1);
+  const latlngs = polyline.positions.map(pos => L.latLng(pos.y, pos.x));
   polyline.layer.setLatLngs(latlngs);
 }
 
@@ -254,7 +267,7 @@ function handleChange(newData) {
             </template>
           </a-list>
         </a-card>
-        <a-card title="点位信息">
+        <a-card :title="`点位信息 - ${selectedPolyline.name || '未选择路径'}`">
           <a-table 
             :columns="columns" 
             :data="selectedPolyline.positions" 
@@ -268,14 +281,12 @@ function handleChange(newData) {
             <template #x="{ record, rowIndex }">
               <a-input-number 
                 v-model="record.x" 
-                :precision="2"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
               />
             </template>
             <template #y="{ record, rowIndex }">
               <a-input-number 
                 v-model="record.y" 
-                :precision="2"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'y', value)"
               />
             </template>
@@ -299,6 +310,15 @@ function handleChange(newData) {
                 <a-option value="target">目标点</a-option>
               </a-select>
             </template>
+            <template #operations="{ record, rowIndex }">
+              <a-button 
+                @click="deletePosition(rowIndex)" 
+                status="danger" 
+                size="small"
+              >
+                删除
+              </a-button>
+            </template>
           </a-table>
         </a-card>
       </a-space>
@@ -314,6 +334,7 @@ const columns = [
   { title: '类型', dataIndex: 'type', slotName: 'type' },
   { title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode' },
   { title: '动作', dataIndex: 'action', slotName: 'action' },
+  { title: '操作', slotName: 'operations' },
 ];
 </script>
 
