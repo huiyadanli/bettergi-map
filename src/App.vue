@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, watch, nextTick } from 'vue';
+import { onMounted, ref, computed } from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
@@ -71,21 +71,22 @@ function initMap() {
       e.layer.on("pm:edit", handleMapPointChange);
     }
   });
+}
 
-  // 修改 handleMapPointChange 函数
-  function handleMapPointChange(e) {
-    updatePolyline(e.target);
-  }
+
+function handleMapPointChange(e) {
+  updatePolyline(e.target);
 }
 
 // 修改 addPolyline 函数
-function addPolyline(layer) {
+function addPolyline(layer, name = "未命名路径") {
   const newPolyline = {
+    name: name,
     layer: layer,
     positions: layer.getLatLngs().map((latlng, index) => ({
       id: index + 1,
       action: "",
-      move_mode: index === 0 ? "walk" : "fly",
+      move_mode: "walk",
       type: index === 0 ? "teleport" : "path",
       x: latlng.lng,
       y: latlng.lat
@@ -93,7 +94,11 @@ function addPolyline(layer) {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
-  
+}
+
+// 添加重命名函数
+function renamePolyline(index, newName) {
+  polylines.value[index].name = newName;
 }
 
 function updatePolyline(layer) {
@@ -101,13 +106,13 @@ function updatePolyline(layer) {
   if (index !== -1) {
     polylines.value[index].positions = layer.getLatLngs().map((latlng, idx) => ({
       ...polylines.value[index].positions[idx],
+      id: idx + 1,
+      type: "path",
+      move_mode: "walk",
+      action: "",
       x: latlng.lng,
       y: latlng.lat
     }));
-    // 强制更新视图
-    nextTick(() => {
-      polylines.value = [...polylines.value];
-    });
   }
 }
 
@@ -133,20 +138,22 @@ function importPositions() {
         color: 'red',
         weight: 3
       }).addTo(map.value);
-      addPolyline(layer);
+      layer.on("pm:edit", handleMapPointChange);
+      addPolyline(layer, data.info.name);
     };
     reader.readAsText(file);
   };
   input.click();
 }
 
-function exportPositions() {
+function exportPositions(index) {
+  const polyline = polylines.value[index];
   const data = {
     info: {
-      name: "月莲_禅那园",
+      name: polyline.name,
       type: "collect"
     },
-    positions: selectedPolyline.value.positions.map(pos => {
+    positions: polyline.positions.map(pos => {
       const gamePos = main1024ToGame(pos.x, pos.y);
       return {
         ...pos,
@@ -160,7 +167,7 @@ function exportPositions() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'positions.json';
+  a.download = `${polyline.name}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -195,10 +202,26 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
   const polyline = polylines.value[polylineIndex];
   polyline.positions[positionIndex][key] = value;
   updateMapFromTable(polylineIndex, positionIndex);
-  // 强制更新视图
-  nextTick(() => {
-    polylines.value = [...polylines.value];
-  });
+}
+
+// 添加动作选项
+const actionOptions = [
+  { label: '无', value: '' },
+  { label: '下落攻击', value: 'stop_flying' },
+];
+
+function handleChange(newData) {
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  
+  // 更新位置数据
+  polyline.positions = newData.map((item, index) => ({
+    ...item,
+    id: index + 1
+  }));
+
+  // 更新地图上的折线
+  const latlngs = newData.map(pos => [pos.y, pos.x]);
+  polyline.layer.setLatLngs(latlngs);
 }
 
 </script>
@@ -210,27 +233,38 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
     </a-layout-sider>
     <a-layout-content>
       <a-space direction="vertical" size="large" fill>
-        <a-card title="操作">
-          <a-space>
-            <a-button @click="importPositions">导入点位</a-button>
-            <a-button @click="exportPositions">导出点位</a-button>
-          </a-space>
-        </a-card>
-        <a-card title="折线列表">
+        <a-card title="路径列表">
+          <template #extra>
+            <a-button @click="importPositions" type="primary" size="small">导入路径</a-button>
+          </template>
           <a-list :data="polylines" :bordered="false">
             <template #item="{ item, index }">
               <a-list-item>
                 <a-space>
-                  <span>折线 {{ index + 1 }}</span>
+                  <a-input
+                    v-model="item.name"
+                    @change="(value) => renamePolyline(index, value)"
+                    style="width: 150px;"
+                  />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
                   <a-button @click="deletePolyline(index)" status="danger" size="small">删除</a-button>
+                  <a-button @click="exportPositions(index)" type="secondary" size="small">导出</a-button>
                 </a-space>
               </a-list-item>
             </template>
           </a-list>
         </a-card>
         <a-card title="点位信息">
-          <a-table :columns="columns" :data="selectedPolyline.positions" :pagination="false">
+          <a-table 
+            :columns="columns" 
+            :data="selectedPolyline.positions" 
+            :pagination="false"
+            :draggable="{ type: 'handle', width: 40 }"
+            @change="handleChange"
+          >
+            <template #drag-handle-icon>
+              <icon-drag-dot-vertical />
+            </template>
             <template #x="{ record, rowIndex }">
               <a-input-number 
                 v-model="record.x" 
@@ -252,7 +286,18 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-input v-model="record.action" placeholder="输入动作" />
+              <a-select v-model="record.action" style="width: 120px">
+                <a-option v-for="option in actionOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </a-option>
+              </a-select>
+            </template>
+            <template #type="{ record }">
+              <a-select v-model="record.type" style="width: 120px">
+                <a-option value="teleport">传送点</a-option>
+                <a-option value="path">途经点</a-option>
+                <a-option value="target">目标点</a-option>
+              </a-select>
             </template>
           </a-table>
         </a-card>
@@ -263,9 +308,10 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
 
 <script>
 const columns = [
-  { title: '序号', dataIndex: 'id' },
+  { title: '#', dataIndex: 'id' },
   { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
   { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },
+  { title: '类型', dataIndex: 'type', slotName: 'type' },
   { title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode' },
   { title: '动作', dataIndex: 'action', slotName: 'action' },
 ];
