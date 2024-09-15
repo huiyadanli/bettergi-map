@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { gameToMain1024, main1024ToGame } from './utils/coordinateConverter';
+import { Modal } from '@arco-design/web-vue';
 
 // 修改这一行
 const mapImage = ref('/1024_map.jpg');
@@ -13,6 +14,12 @@ const imageHeight = ref(0);
 const map = ref(null);
 const polylines = ref([]);
 const selectedPolylineIndex = ref(0);
+
+// 添加新的响应式变量
+const newPointX = ref(0);
+const newPointY = ref(0);
+const showAddPointModal = ref(false);
+const newPointName = ref('');
 
 onMounted(() => {
   const img = new Image();
@@ -238,6 +245,54 @@ function deletePosition(index) {
   polyline.layer.setLatLngs(latlngs);
 }
 
+function openAddPointModal() {
+  showAddPointModal.value = true;
+  newPointX.value = 0;
+  newPointY.value = 0;
+  newPointName.value = '';
+}
+
+function addNewPoint(x, y) {
+  const newPoint = {
+    id: 1,
+    x: x,
+    y: y,
+    type: 'path',
+    move_mode: 'walk',
+    action: ''
+  };
+
+  if (selectedPolylineIndex.value === -1 || polylines.value.length === 0) {
+    // 如果没有选中的路径或没有路径，创建新路径
+    const layer = L.polyline([L.latLng(y, x)], {
+      color: 'red',
+      weight: 3
+    }).addTo(map.value);
+    layer.on("pm:edit", handleMapPointChange);
+    addPolyline(layer, "未命名路径");  // 使用默认名称 "未命名路径"
+  } else {
+    // 添加新点位到现有路径
+    const polyline = polylines.value[selectedPolylineIndex.value];
+    newPoint.id = polyline.positions.length + 1;
+    polyline.positions.push(newPoint);
+
+    // 更新地图上的折线
+    const latlngs = polyline.layer.getLatLngs();
+    latlngs.push(L.latLng(y, x));
+    polyline.layer.setLatLngs(latlngs);
+  }
+}
+
+window.addNewPoint = (x, y) => {
+  addNewPoint(x, y);
+};
+  
+
+function handleAddPointFromModal() {
+  addNewPoint(newPointX.value, newPointY.value);
+  showAddPointModal.value = false;
+}
+
 </script>
 
 <template>
@@ -321,10 +376,31 @@ function deletePosition(index) {
               </a-button>
             </template>
           </a-table>
+
+          <template #extra>
+            <a-button @click="openAddPointModal" type="primary" size="small">添加点位</a-button>
+          </template>
         </a-card>
       </a-space>
     </a-layout-content>
   </a-layout>
+
+  <!-- 添加点位的模态框 -->
+  <a-modal
+    v-model:visible="showAddPointModal"
+    title="添加新点位"
+    @ok="handleAddPointFromModal"
+    @cancel="showAddPointModal = false"
+  >
+    <a-form :model="{ x: newPointX, y: newPointY }">
+      <a-form-item field="x" label="X坐标">
+        <a-input-number v-model="newPointX" placeholder="请输入X坐标" />
+      </a-form-item>
+      <a-form-item field="y" label="Y坐标">
+        <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
 </template>
 
 <script>
