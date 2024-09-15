@@ -87,7 +87,7 @@ function handleMapPointChange(e) {
   updatePolyline(e.target);
 }
 
-// 修改 addPolyline 函数
+// 保持原有的 addPolyline 函数不变
 function addPolyline(layer, name = "未命名路径") {
   const newPolyline = {
     name: name,
@@ -107,6 +107,52 @@ function addPolyline(layer, name = "未命名路径") {
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
   selectPolyline(selectedPolylineIndex.value);
+}
+
+// 新增一个函数来处理导入的数据
+function addImportedPolyline(importedData) {
+  const positions = importedData.positions.map(pos => {
+    const main1024Pos = gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
+  const layer = L.polyline(positions, {
+    color: 'red',
+    weight: 3
+  }).addTo(map.value);
+  layer.on("pm:edit", handleMapPointChange);
+
+  const newPolyline = {
+    name: importedData.info.name,
+    layer: layer,
+    positions: importedData.positions.map((pos, index) => ({
+      id: index + 1,
+      x: pos.x,
+      y: pos.y,
+      action: pos.action || "",
+      move_mode: pos.move_mode || "walk",
+      type: pos.type || "path"
+    }))
+  };
+  polylines.value.push(newPolyline);
+  selectedPolylineIndex.value = polylines.value.length - 1;
+  selectPolyline(selectedPolylineIndex.value);
+}
+
+// 修改 importPositions 函数
+function importPositions() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = (event) => {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = JSON.parse(e.target.result);
+      addImportedPolyline(data);
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 // 添加重命名函数
@@ -130,39 +176,6 @@ function updatePolyline(layer) {
       };
     });
   }
-}
-
-function importPositions() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = (event) => {
-    const file = event.target.files[0];
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = JSON.parse(e.target.result);
-      const positions = data.positions.map(pos => {
-        const main1024Pos = gameToMain1024(pos.x, pos.y);
-        return {
-          ...pos,
-          x: main1024Pos.x,
-          y: main1024Pos.y
-        };
-      });
-      const latlngs = positions.map(pos => L.latLng(pos.y, pos.x));
-      const layer = L.polyline(latlngs, {
-        color: 'red',
-        weight: 3
-      }).addTo(map.value);
-      layer.on("pm:edit", handleMapPointChange);
-      addPolyline(layer, data.info.name);
-      
-      // 选中新导入的路径
-      selectPolyline(polylines.value.length - 1);
-    };
-    reader.readAsText(file);
-  };
-  input.click();
 }
 
 function exportPositions(index) {
@@ -233,7 +246,7 @@ function handleChange(newData) {
   }));
 
   // 更新地图上的折线
-  const latlngs = polyline.positions.map(pos => {
+  const latlngs = newData.map(pos => {
     const main1024Pos = gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
@@ -306,7 +319,7 @@ function handleAddPointFromModal() {
 
 <template>
   <a-layout class="layout">
-    <a-layout-sider width="40%" :resize-directions="['right']">
+    <a-layout-sider width="45%" :resize-directions="['right']">
       <div id="map"></div>
     </a-layout-sider>
     <a-layout-content>
@@ -357,8 +370,9 @@ function handleAddPointFromModal() {
             </template>
             <template #move_mode="{ record }">
               <a-select v-model="record.move_mode">
-                <a-option value="walk">步行</a-option>
+                <a-option value="walk">行走</a-option>
                 <a-option value="fly">飞行</a-option>
+                <a-option value="swim">游泳</a-option>
               </a-select>
             </template>
             <template #action="{ record }">
@@ -442,13 +456,5 @@ const columns = [
   padding: 16px;
   background: #f0f2f5;
   overflow-y: auto;
-}
-
-.arco-select-view {
-  padding: 0 8px !important;
-}
-
-.arco-select-view-value {
-  font-size: 12px;
 }
 </style>
