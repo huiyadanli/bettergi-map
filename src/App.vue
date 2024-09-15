@@ -92,14 +92,17 @@ function addPolyline(layer, name = "未命名路径") {
   const newPolyline = {
     name: name,
     layer: layer,
-    positions: layer.getLatLngs().map((latlng, index) => ({
-      id: index + 1,
-      action: "",
-      move_mode: "walk",
-      type: index === 0 ? "teleport" : "path",
-      x: latlng.lng,
-      y: latlng.lat
-    }))
+    positions: layer.getLatLngs().map((latlng, index) => {
+      const gamePos = main1024ToGame(latlng.lng, latlng.lat);
+      return {
+        id: index + 1,
+        action: "",
+        move_mode: "walk",
+        type: index === 0 ? "teleport" : "path",
+        x: gamePos.x,
+        y: gamePos.y
+      };
+    })
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -114,15 +117,18 @@ function renamePolyline(index, newName) {
 function updatePolyline(layer) {
   const index = polylines.value.findIndex(p => p.layer === layer);
   if (index !== -1) {
-    polylines.value[index].positions = layer.getLatLngs().map((latlng, idx) => ({
-      ...polylines.value[index].positions[idx],
-      id: idx + 1,
-      type: "path",
-      move_mode: "walk",
-      action: "",
-      x: latlng.lng,
-      y: latlng.lat
-    }));
+    polylines.value[index].positions = layer.getLatLngs().map((latlng, idx) => {
+      const gamePos = main1024ToGame(latlng.lng, latlng.lat);
+      return {
+        ...polylines.value[index].positions[idx],
+        id: idx + 1,
+        type: "path",
+        move_mode: "walk",
+        action: "",
+        x: gamePos.x,
+        y: gamePos.y
+      };
+    });
   }
 }
 
@@ -136,11 +142,11 @@ function importPositions() {
     reader.onload = (e) => {
       const data = JSON.parse(e.target.result);
       const positions = data.positions.map(pos => {
-        const convertedPos = gameToMain1024(pos.x, pos.y);
+        const main1024Pos = gameToMain1024(pos.x, pos.y);
         return {
           ...pos,
-          x: convertedPos.x,
-          y: convertedPos.y
+          x: main1024Pos.x,
+          y: main1024Pos.y
         };
       });
       const latlngs = positions.map(pos => L.latLng(pos.y, pos.x));
@@ -166,14 +172,7 @@ function exportPositions(index) {
       name: polyline.name,
       type: "collect"
     },
-    positions: polyline.positions.map(pos => {
-      const gamePos = main1024ToGame(pos.x, pos.y);
-      return {
-        ...pos,
-        x: gamePos.x,
-        y: gamePos.y
-      };
-    })
+    positions: polyline.positions // 已经是游戏坐标，无需转换
   };
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -206,8 +205,9 @@ function deletePolyline(index) {
 function updateMapFromTable(polylineIndex, positionIndex) {
   const polyline = polylines.value[polylineIndex];
   const position = polyline.positions[positionIndex];
+  const main1024Pos = gameToMain1024(position.x, position.y);
   const latlngs = polyline.layer.getLatLngs();
-  latlngs[positionIndex] = L.latLng(position.y, position.x);
+  latlngs[positionIndex] = L.latLng(main1024Pos.y, main1024Pos.x);
   polyline.layer.setLatLngs(latlngs);
 }
 
@@ -233,7 +233,10 @@ function handleChange(newData) {
   }));
 
   // 更新地图上的折线
-  const latlngs = newData.map(pos => L.latLng(pos.y, pos.x));
+  const latlngs = polyline.positions.map(pos => {
+    const main1024Pos = gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
   polyline.layer.setLatLngs(latlngs);
 }
 
@@ -241,7 +244,12 @@ function handleChange(newData) {
 function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(index, 1);
-  const latlngs = polyline.positions.map(pos => L.latLng(pos.y, pos.x));
+  
+  // 更新地图上的折线
+  const latlngs = polyline.positions.map(pos => {
+    const main1024Pos = gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
   polyline.layer.setLatLngs(latlngs);
 }
 
@@ -253,6 +261,7 @@ function openAddPointModal() {
 }
 
 function addNewPoint(x, y) {
+  const main1024Pos = gameToMain1024(x, y);
   const newPoint = {
     id: 1,
     x: x,
@@ -264,7 +273,7 @@ function addNewPoint(x, y) {
 
   if (selectedPolylineIndex.value === -1 || polylines.value.length === 0) {
     // 如果没有选中的路径或没有路径，创建新路径
-    const layer = L.polyline([L.latLng(y, x)], {
+    const layer = L.polyline([L.latLng(main1024Pos.y, main1024Pos.x)], {
       color: 'red',
       weight: 3
     }).addTo(map.value);
@@ -278,7 +287,7 @@ function addNewPoint(x, y) {
 
     // 更新地图上的折线
     const latlngs = polyline.layer.getLatLngs();
-    latlngs.push(L.latLng(y, x));
+    latlngs.push(L.latLng(main1024Pos.y, main1024Pos.x));
     polyline.layer.setLatLngs(latlngs);
   }
 }
