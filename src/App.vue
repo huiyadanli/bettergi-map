@@ -6,7 +6,8 @@ import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { gameToMain1024, main1024ToGame } from './utils/coordinateConverter';
 
-const mapImage = ref('/src/assets/1024_map.jpg');
+// 修改这一行
+const mapImage = ref('/1024_map.jpg');
 const imageWidth = ref(0);
 const imageHeight = ref(0);
 const map = ref(null);
