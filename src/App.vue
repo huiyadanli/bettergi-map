@@ -306,7 +306,7 @@ function handleAddPointFromModal() {
 
 <template>
   <a-layout class="layout">
-    <a-layout-sider width="50%">
+    <a-layout-sider width="40%" :resize-directions="['right']">
       <div id="map"></div>
     </a-layout-sider>
     <a-layout-content>
@@ -356,23 +356,23 @@ function handleAddPointFromModal() {
               />
             </template>
             <template #move_mode="{ record }">
-              <a-select v-model="record.move_mode" style="width: 120px">
+              <a-select v-model="record.move_mode">
                 <a-option value="walk">步行</a-option>
                 <a-option value="fly">飞行</a-option>
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-select v-model="record.action" style="width: 120px">
+              <a-select v-model="record.action">
                 <a-option v-for="option in actionOptions" :key="option.value" :value="option.value">
                   {{ option.label }}
                 </a-option>
               </a-select>
             </template>
             <template #type="{ record }">
-              <a-select v-model="record.type" style="width: 120px">
-                <a-option value="teleport">传送点</a-option>
-                <a-option value="path">途经点</a-option>
-                <a-option value="target">目标点</a-option>
+              <a-select v-model="record.type">
+                <a-option value="teleport">传送</a-option>
+                <a-option value="path">途经</a-option>
+                <a-option value="target">目标</a-option>
               </a-select>
             </template>
             <template #operations="{ record, rowIndex }">
@@ -442,5 +442,13 @@ const columns = [
   padding: 16px;
   background: #f0f2f5;
   overflow-y: auto;
+}
+
+.arco-select-view {
+  padding: 0 8px !important;
+}
+
+.arco-select-view-value {
+  font-size: 12px;
 }
 </style>
