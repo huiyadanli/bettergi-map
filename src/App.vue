@@ -8,7 +8,7 @@ import { gameToMain1024, main1024ToGame } from './utils/coordinateConverter';
 import { Modal } from '@arco-design/web-vue';
 
 // 修改这一行
-const mapImage = ref('/1024_map.jpg');
+const mapImage = ref('./1024_map.jpg');
 const imageWidth = ref(0);
 const imageHeight = ref(0);
 const map = ref(null);
