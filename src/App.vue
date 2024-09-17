@@ -20,6 +20,8 @@ const newPointX = ref(0);
 const newPointY = ref(0);
 const showAddPointModal = ref(false);
 const newPointName = ref('');
+const selectedPointIndex = ref(-1);
+const highlightMarker = ref(null);
 
 onMounted(() => {
   const img = new Image();
@@ -82,8 +84,15 @@ function initMap() {
   });
 }
 
+function removeHighlightMarker() {
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
+}
 
 function handleMapPointChange(e) {
+  removeHighlightMarker();
   updatePolyline(e.target);
 }
 
@@ -315,6 +324,28 @@ function handleAddPointFromModal() {
   showAddPointModal.value = false;
 }
 
+function selectPoint(record, rowIndex) {
+  removeHighlightMarker();
+
+  // 高亮选中的点
+  const main1024Pos = gameToMain1024(record.x, record.y);
+  
+  // 创建新的高亮标记
+  highlightMarker.value = L.marker([main1024Pos.y, main1024Pos.x], {
+    icon: L.divIcon({
+      className: 'highlight-marker',
+      html: '<div style="background-color: #ff3333; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    })
+  }).addTo(map.value);
+
+  selectedPointIndex.value = rowIndex;
+  
+  // 将地图视图居中到选中的点
+  map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
+}
+
 </script>
 
 <template>
@@ -352,6 +383,7 @@ function handleAddPointFromModal() {
             :pagination="false"
             :draggable="{ type: 'handle', width: 40 }"
             @change="handleChange"
+            @row-click="selectPoint"
           >
             <template #drag-handle-icon>
               <icon-drag-dot-vertical />
@@ -456,5 +488,13 @@ const columns = [
   padding: 16px;
   background: #f0f2f5;
   overflow-y: auto;
+}
+
+.arco-table-tr-active {
+  background-color: #e6f7ff;
+}
+
+.highlight-marker {
+  z-index: 1000; /* 确保高亮标记显示在其他标记之上 */
 }
 </style>
