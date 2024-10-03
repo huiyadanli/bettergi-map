@@ -23,6 +23,11 @@ const newPointName = ref('');
 const selectedPointIndex = ref(-1);
 const highlightMarker = ref(null);
 
+// 导出
+const exportAuthor = ref('');
+const exportVersion = ref('1.0');
+const showExportModal = ref(false);
+
 onMounted(() => {
   const img = new Image();
   img.onload = function() {
@@ -140,7 +145,8 @@ function addImportedPolyline(importedData) {
       action: pos.action || "",
       move_mode: pos.move_mode || "walk",
       type: pos.type || "path"
-    }))
+    })),
+    info: importedData.info // 保留导入时的信息
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -189,10 +195,21 @@ function updatePolyline(layer) {
 
 function exportPositions(index) {
   const polyline = polylines.value[index];
+  exportAuthor.value = polyline.info.author || ''; // 回填作者信息
+  exportVersion.value = polyline.info.version || ''; // 回填版本信息
+  showExportModal.value = true;
+  selectedPolylineIndex.value = index;
+}
+
+function handleExport() {
+  const polyline = polylines.value[selectedPolylineIndex.value];
   const data = {
     info: {
       name: polyline.name,
-      type: "collect"
+      type: "collect",
+      author: exportAuthor.value, // 使用用户输入的作者信息
+      version: exportVersion.value, // 使用用户输入的版本信息
+      bgiVersion: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
@@ -204,6 +221,7 @@ function exportPositions(index) {
   a.download = `${polyline.name}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  showExportModal.value = false;
 }
 
 const selectedPolyline = computed(() => {
@@ -243,6 +261,9 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
 const actionOptions = [
   { label: '无', value: '' },
   { label: '下落攻击', value: 'stop_flying' },
+  { label: '强制传送', value: 'force_tp' },
+  { label: '纳西妲长E收集', value: 'nahida_collect' },
+  { label: '战斗', value: 'fight' },
 ];
 
 function handleChange(newData) {
@@ -325,7 +346,11 @@ function handleAddPointFromModal() {
 }
 
 function selectPoint(record, rowIndex) {
-  removeHighlightMarker();
+  // 清除之前的高亮标记
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
 
   // 高亮选中的点
   const main1024Pos = gameToMain1024(record.x, record.y);
@@ -453,6 +478,23 @@ function selectPoint(record, rowIndex) {
       </a-form-item>
       <a-form-item field="y" label="Y坐标">
         <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
+
+  <!-- 导出模态框 -->
+  <a-modal
+    v-model:visible="showExportModal"
+    title="导出路径"
+    @ok="handleExport"
+    @cancel="showExportModal = false"
+  >
+    <a-form :model="{ author: exportAuthor, version: exportVersion }">
+      <a-form-item field="author" label="作者">
+        <a-input v-model="exportAuthor" placeholder="请输入作者" />
+      </a-form-item>
+      <a-form-item field="version" label="版本">
+        <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始" />
       </a-form-item>
     </a-form>
   </a-modal>
