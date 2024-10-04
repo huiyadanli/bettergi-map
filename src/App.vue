@@ -117,7 +117,13 @@ function addPolyline(layer, name = "未命名路径") {
         x: gamePos.x,
         y: gamePos.y
       };
-    })
+    }),
+    info: { // 初始化 info 属性
+      name: name,
+      author: '',
+      version: '1.0',
+      description: ''
+    }
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -196,8 +202,10 @@ function updatePolyline(layer) {
 
 function exportPositions(index) {
   const polyline = polylines.value[index];
-  exportAuthor.value = polyline.info.author || ''; // 回填作者信息
-  exportVersion.value = polyline.info.version || ''; // 回填版本信息
+  // 检查 polyline.info 是否存在
+  const info = polyline.info || {};
+  exportAuthor.value = info.author || ''; // 回填作者信息
+  exportVersion.value = info.version || ''; // 回填版本信息
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
 }
