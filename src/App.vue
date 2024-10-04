@@ -26,6 +26,7 @@ const highlightMarker = ref(null);
 // 导出
 const exportAuthor = ref('');
 const exportVersion = ref('1.0');
+const exportDescription = ref('');
 const showExportModal = ref(false);
 
 onMounted(() => {
@@ -209,6 +210,7 @@ function handleExport() {
       type: "collect",
       author: exportAuthor.value, // 使用用户输入的作者信息
       version: exportVersion.value, // 使用用户输入的版本信息
+      description: exportDescription.value, // 添加描述信息
       bgiVersion: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
@@ -495,6 +497,9 @@ function selectPoint(record, rowIndex) {
       </a-form-item>
       <a-form-item field="version" label="版本">
         <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始" />
+      </a-form-item>
+      <a-form-item field="description" label="描述">
+        <a-textarea v-model="exportDescription" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
       </a-form-item>
     </a-form>
   </a-modal>
