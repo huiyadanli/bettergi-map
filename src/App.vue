@@ -190,9 +190,6 @@ function updatePolyline(layer) {
       return {
         ...polylines.value[index].positions[idx],
         id: idx + 1,
-        type: "path",
-        move_mode: "walk",
-        action: "",
         x: gamePos.x,
         y: gamePos.y
       };
