@@ -185,15 +185,30 @@ function renamePolyline(index, newName) {
 function updatePolyline(layer) {
   const index = polylines.value.findIndex(p => p.layer === layer);
   if (index !== -1) {
-    polylines.value[index].positions = layer.getLatLngs().map((latlng, idx) => {
-      const gamePos = main1024ToGame(latlng.lng, latlng.lat);
-      return {
-        ...polylines.value[index].positions[idx],
-        id: idx + 1,
-        x: gamePos.x,
-        y: gamePos.y
-      };
-    });
+    const currentPositions = polylines.value[index].positions;
+    const newLatLngs = layer.getLatLngs();
+    
+    if (currentPositions.length === newLatLngs.length) {
+      // 如果长度没有变化，直接更新对应索引下的 x, y 数据
+      currentPositions.forEach((pos, idx) => {
+        const gamePos = main1024ToGame(newLatLngs[idx].lng, newLatLngs[idx].lat);
+        pos.x = gamePos.x;
+        pos.y = gamePos.y;
+      });
+    } else {
+      // 如果长度发生变化，进行匹配更新
+      const updatedPositions = newLatLngs.map((latlng, idx) => {
+        const gamePos = main1024ToGame(latlng.lng, latlng.lat);
+        const existingPosition = currentPositions.find(pos => pos.x === gamePos.x && pos.y === gamePos.y);
+        return {
+          ...existingPosition, // 保留原有数据
+          id: idx + 1,
+          x: gamePos.x,
+          y: gamePos.y
+        };
+      });
+      polylines.value[index].positions = updatedPositions;
+    }
   }
 }
 
