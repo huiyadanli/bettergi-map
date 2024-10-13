@@ -450,8 +450,10 @@ function selectPoint(record, rowIndex) {
             <template #move_mode="{ record }">
               <a-select v-model="record.move_mode">
                 <a-option value="walk">行走</a-option>
+                <a-option value="run">冲刺</a-option>
                 <a-option value="fly">飞行</a-option>
                 <a-option value="swim">游泳</a-option>
+                <a-option value="climb">攀爬</a-option>
               </a-select>
             </template>
             <template #action="{ record }">
