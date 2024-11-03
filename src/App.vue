@@ -286,10 +286,11 @@ const actionOptions = [
   { label: '强制传送', value: 'force_tp' },
   { label: '纳西妲长E收集', value: 'nahida_collect' },
   { label: '战斗', value: 'fight' },
-  { label: '普通攻击', value: 'normal_attack' },
-  { label: '元素战技', value: 'elemental_skill' },
   { label: '在附近拾取', value: 'pick_around' },
   { label: '四叶印', value: 'up_down_grab_leaf' },
+  { label: '水元素力采集', value: 'hydro_collect' },
+  { label: '雷元素力采集', value: 'electro_collect' },
+  { label: '风元素力采集', value: 'anemo_collect' },
 ];
 
 function handleChange(newData) {
