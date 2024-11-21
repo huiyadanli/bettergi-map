@@ -1,11 +1,11 @@
 const GameMapRows = 13; // 游戏坐标下地图块的行数
-const GameMapCols = 16; // 游戏坐标下地图块的列数
+const GameMapCols = 18; // 游戏坐标下地图块的列数
 
 // 游戏坐标下 左上角离地图原点的行数
 const GameMapUpRows = 5;
 
 // 游戏坐标下 左上角离地图原点的列数
-const GameMapLeftCols = 9;
+const GameMapLeftCols = 11;
 
 // 游戏地图块的长宽
 const GameMapBlockWidth = 1024;
