@@ -291,6 +291,7 @@ const actionOptions = [
   { label: '水元素力采集', value: 'hydro_collect' },
   { label: '雷元素力采集', value: 'electro_collect' },
   { label: '风元素力采集', value: 'anemo_collect' },
+  { label: '执行战斗策略', value: 'combat_script' },
 ];
 
 function handleChange(newData) {
