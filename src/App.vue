@@ -115,7 +115,8 @@ function addPolyline(layer, name = "未命名路径") {
         move_mode: "walk",
         type: index === 0 ? "teleport" : "path",
         x: gamePos.x,
-        y: gamePos.y
+        y: gamePos.y,
+        action_params:""
       };
     }),
     info: { // 初始化 info 属性
@@ -151,6 +152,7 @@ function addImportedPolyline(importedData) {
       y: pos.y,
       action: pos.action || "",
       move_mode: pos.move_mode || "walk",
+      action_params:pos.action_params,
       type: pos.type || "path"
     })),
     info: importedData.info // 保留导入时的信息
@@ -339,7 +341,8 @@ function addNewPoint(x, y) {
     y: y,
     type: 'path',
     move_mode: 'walk',
-    action: ''
+    action: '',
+    action_params:''
   };
 
   if (selectedPolylineIndex.value === -1 || polylines.value.length === 0) {
@@ -366,7 +369,7 @@ function addNewPoint(x, y) {
 window.addNewPoint = (x, y) => {
   addNewPoint(x, y);
 };
-  
+
 
 function handleAddPointFromModal() {
   addNewPoint(newPointX.value, newPointY.value);
@@ -398,6 +401,93 @@ function selectPoint(record, rowIndex) {
   // 将地图视图居中到选中的点
   map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
 }
+//本地存储
+const saveLocal = (k,v) => {
+  localStorage.setItem("bgiMap"+k, JSON.stringify(v));
+}
+const loadLocal = (k) => {
+  const  val=localStorage.getItem("bgiMap"+k);
+  if(!val) return val;
+  return JSON.parse(val) ;
+}
+
+//战斗策略管理
+console.log('vue')
+const combatScriptKey="_combatScriptData";
+const getCombatScriptByLocal=()=>{
+  return (loadLocal(combatScriptKey)||[]);
+}
+const showAddCombatScript =ref(false);
+const combatScriptData=ref(getCombatScriptByLocal());
+const showCombatScriptManagerModal=ref(false);
+const combatScriptManagerModal=()=>{
+  showCombatScriptManagerModal.value=true;
+}
+
+const saveCombatScript=()=>{
+  //const val=[{value:"钟离 e(hold);坎蒂丝 e(hold);雷泽 e(hold);卡齐娜 e;凝光 attack(0.2),attack(0.2),attack(0.2),attack(0.2),attack(0.2)",def:true}];
+ // saveLocal(combatScriptKey,val);
+  //combatScriptData.value=getCombatScriptByLocal();
+  
+}
+//默认战斗策略赋值
+const actionChange = (record) => {
+  if (record.action === "combat_script"){
+    record.action_params=(combatScriptData.value.find(item=>item.def) || {}).value;
+  }else{
+    record.action_params="";
+  }
+}
+const newActionParams=ref({value:"",def:false});
+const addCombatScript=()=>{
+ const newActionParamsTemp=Object.assign({},newActionParams.value);
+  if (combatScriptData.value.find(item=>item.value === newActionParamsTemp.value )){
+    alert("不要重复添加！");
+  }else{
+     const temp=combatScriptData.value;
+     //只能一个默认
+     if (newActionParamsTemp.def){
+       temp.forEach((item,index)=>{
+         item.def = false;
+       })
+     }
+    newActionParams.value={value:"",def:false};
+    combatScriptData.value=[...temp,newActionParamsTemp];
+    saveLocal(combatScriptKey,combatScriptData.value);
+    
+  }
+  
+}
+const deleteCombatScriptPosition=index=>{
+  combatScriptData.value.splice(index,1);
+  saveLocal(combatScriptKey,combatScriptData.value);
+}
+const changeCombatScriptDef=(rowindex)=>{
+  if (combatScriptData.value[rowindex].def){
+    combatScriptData.value.forEach((item,index)=>{
+      if (index!==rowindex){
+        item.def=false;
+      }
+    })
+  }
+  saveLocal(combatScriptKey,combatScriptData.value);
+}
+const combatScriptColumns = [
+  {
+    title: '策略参数',
+    dataIndex: 'value',
+  },
+  {
+    title: '是否默认',
+    dataIndex: 'def',
+    slotName:'def'
+  },
+  {
+    title: '操作',
+    dataIndex: 'operations',
+    slotName:'operations'
+  }]
+
 
 </script>
 
@@ -463,11 +553,13 @@ function selectPoint(record, rowIndex) {
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-select v-model="record.action">
-                <a-option v-for="option in actionOptions" :key="option.value" :value="option.value">
+              <a-select v-model="record.action" @change="actionChange(record)">
+                <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
                   {{ option.label }}
                 </a-option>
               </a-select>
+              <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
+              
             </template>
             <template #type="{ record }">
               <a-select v-model="record.type">
@@ -488,13 +580,65 @@ function selectPoint(record, rowIndex) {
           </a-table>
 
           <template #extra>
-            <a-button @click="openAddPointModal" type="primary" size="small">添加点位</a-button>
+            <a-button @click="combatScriptManagerModal" type="primary" size="small">战斗策略管理</a-button>
+            <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位</a-button>
           </template>
         </a-card>
       </a-space>
     </a-layout-content>
   </a-layout>
+  <!-- 战斗策略管理 -->
+  
+  <a-modal
+      v-model:visible="showCombatScriptManagerModal"
+      title="战斗策略管理"
+      @ok="saveCombatScript"
+      @cancel="showCombatScriptManagerModal = false"
+      width="50%" height="50%"
+  >
 
+    <a-space direction="vertical" size="large" fill>
+      <a-card >
+       
+        <a-table :columns="combatScriptColumns" :data="combatScriptData"  :pagination="false">
+          <template #def="{ record, rowIndex }">
+            <a-checkbox :value="true" v-model="record.def"  @change="changeCombatScriptDef(rowIndex)"></a-checkbox>
+          </template>
+          <template #operations="{ record, rowIndex }">
+            <a-button
+                @click="deleteCombatScriptPosition(rowIndex)"
+                status="danger"
+                size="small"
+            >
+              删除
+            </a-button>
+          </template>
+          
+        </a-table>
+        <template #extra>
+          <a-button @click="showAddCombatScript = true" type="primary" size="small" style="margin-left: 20px;">添加</a-button>
+        </template>
+      </a-card>
+    </a-space>
+    
+  </a-modal>
+  <!-- 添加战斗策略 -->
+  <a-modal
+      v-model:visible="showAddCombatScript"
+      title="添加战斗策略"
+      @ok="addCombatScript"
+      @cancel="showAddCombatScript = false"
+  >
+    <a-form >
+      <a-form-item label="策略参数">
+        <a-input v-model="newActionParams.value"  allow-clear />
+      </a-form-item>
+      <a-form-item   label="是否默认">
+        <a-checkbox :value="true" v-model="newActionParams.def"></a-checkbox>
+      </a-form-item>
+    </a-form>
+  </a-modal>
+  
   <!-- 添加点位的模态框 -->
   <a-modal
     v-model:visible="showAddPointModal"
