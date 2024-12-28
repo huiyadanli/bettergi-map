@@ -379,7 +379,22 @@ function openAddPointModal() {
   newPointY.value = 0;
   newPointName.value = '';
 }
-
+function clearPoints(){
+  Modal.confirm({
+    title: '请确认',
+    content: '确定要清除所有点位吗，此操作不可逆？',
+    okText: '确认',
+    cancelText: '取消',
+    onOk: () => {
+      polylines.value[selectedPolylineIndex.value].positions=[];
+      
+    },
+    onCancel: () => {
+      
+    },
+  });
+  
+}
 function addNewPoint(x, y) {
   const main1024Pos = gameToMain1024(x, y);
   const newPoint = {
@@ -405,7 +420,9 @@ function addNewPoint(x, y) {
     // 添加新点位到现有路径
     const polyline = polylines.value[selectedPolylineIndex.value];
     newPoint.id = polyline.positions.length + 1;
-    
+    if(polyline.positions.length===0){
+      newPoint.type="teleport";
+    }
     let lockedIndex=polyline.positions.findIndex(item=>item.locked);
     if (lockedIndex>-1){
       polyline.positions.splice(lockedIndex,0,newPoint);
@@ -640,7 +657,8 @@ const combatScriptColumns = [
           </a-table>
 
           <template #extra>
-            <a-button @click="combatScriptManagerModal" type="primary" size="small">战斗策略管理</a-button>
+            <a-button @click="clearPoints" type="primary" size="small" >清空</a-button>
+            <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">战斗策略管理</a-button>
             <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位</a-button>
           </template>
         </a-card>
