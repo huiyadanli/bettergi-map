@@ -800,4 +800,8 @@ const columns = [
 .highlight-marker {
   z-index: 1000; /* 确保高亮标记显示在其他标记之上 */
 }
+
+.arco-table .arco-table-cell {
+    padding: 8px 8px !important; 
+}
 </style>
