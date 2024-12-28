@@ -6,6 +6,7 @@ import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { gameToMain1024, main1024ToGame } from './utils/coordinateConverter';
 import { Modal } from '@arco-design/web-vue';
+import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
 // 修改这一行
 const mapImage = ref('./1024_map.jpg');
@@ -29,6 +30,16 @@ const exportVersion = ref('1.0');
 const exportDescription = ref('');
 const showExportModal = ref(false);
 
+//本地存储
+const saveLocal = (k,v) => {
+  localStorage.setItem("bgiMap"+k, JSON.stringify(v));
+}
+const loadLocal = (k) => {
+  const  val=localStorage.getItem("bgiMap"+k);
+  if(!val) return val;
+  return JSON.parse(val) ;
+}
+
 onMounted(() => {
   const img = new Image();
   img.onload = function() {
@@ -44,8 +55,8 @@ function initMap() {
   map.value = L.map('map', {
     attributionControl: false,
     crs: L.CRS.Simple,
-    minZoom: -3,  // 允许缩小
-    maxZoom: 2    // 允许放大
+    minZoom: -4,  // 允许缩小
+    maxZoom: 5    // 允许放大
   });
 
   const bounds = [[0, 0], [imageHeight.value, imageWidth.value]];
@@ -167,14 +178,17 @@ function importPositions() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.json';
+  input.multiple = true;
   input.onchange = (event) => {
-    const file = event.target.files[0];
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = JSON.parse(e.target.result);
-      addImportedPolyline(data);
-    };
-    reader.readAsText(file);
+    [...event.target.files].forEach(file=>{
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = JSON.parse(e.target.result);
+        addImportedPolyline(data);
+      };
+      reader.readAsText(file);
+    })
+
   };
   input.click();
 }
@@ -213,12 +227,12 @@ function updatePolyline(layer) {
     }
   }
 }
-
+let preAuthor=(loadLocal("_preAuthor") || {}).preAuthor;
 function exportPositions(index) {
   const polyline = polylines.value[index];
   // 检查 polyline.info 是否存在
   const info = polyline.info || {};
-  exportAuthor.value = info.author || ''; // 回填作者信息
+  exportAuthor.value = info.author|| preAuthor || '' ; // 回填作者信息
   exportVersion.value = info.version || ''; // 回填版本信息
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
@@ -237,6 +251,10 @@ function handleExport() {
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
+  if (!(polyline.info && polyline.info.author)){
+    preAuthor = exportAuthor.value;
+    saveLocal("_preAuthor",{preAuthor})
+  }
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -256,6 +274,7 @@ const selectedPolyline = computed(() => {
 function selectPolyline(index) {
   selectedPolylineIndex.value = index;
   map.value.fitBounds(polylines.value[index].layer.getBounds());
+  map.value.setZoom(2);
 }
 
 function deletePolyline(index) {
@@ -312,13 +331,41 @@ function handleChange(newData) {
   });
   polyline.layer.setLatLngs(latlngs);
 }
+function moreSelect(v){
+  v.onclick.call(null,v.record,v.rowIndex);
+}
+function copyPosition(record,rowIndex){
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  polyline.positions.splice(rowIndex, 0,Object.assign({},record,{locked:false}));
+  updateMapFromPolyLine(polyline);
+}
+function lockRowIndex(record,rowIndex){
+  polylines.value[selectedPolylineIndex.value].positions.forEach((item,index)=>{item.locked=false;});
+  record.locked=true;
+}
+function unlockRowIndex(record,rowIndex){
+  record.locked=false;
+}
 
+const setPositionRowClass=(record,rowIndex)=>{
+  
+  if (record.locked){
+    return "locked";
+  }
+  return "";
+}
 // 添加删除点位的函数
 function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(index, 1);
-  
-  // 更新地图上的折线
+  updateMapFromPolyLine(polyline);
+
+}
+// 更新地图上的折线
+const updateMapFromPolyLine=(polyline)=>{
+  //更新序号
+  polyline.positions.forEach((item,index)=>item.id=index+1);
+  //更新折线图
   const latlngs = polyline.positions.map(pos => {
     const main1024Pos = gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
@@ -351,18 +398,27 @@ function addNewPoint(x, y) {
       color: 'red',
       weight: 3
     }).addTo(map.value);
+    map.value.setZoom(2);
     layer.on("pm:edit", handleMapPointChange);
     addPolyline(layer, "未命名路径");  // 使用默认名称 "未命名路径"
   } else {
     // 添加新点位到现有路径
     const polyline = polylines.value[selectedPolylineIndex.value];
     newPoint.id = polyline.positions.length + 1;
-    polyline.positions.push(newPoint);
+    
+    let lockedIndex=polyline.positions.findIndex(item=>item.locked);
+    if (lockedIndex>-1){
+      polyline.positions.splice(lockedIndex,0,newPoint);
+    }else{
+      polyline.positions.push(newPoint);
+    }
+    
 
     // 更新地图上的折线
-    const latlngs = polyline.layer.getLatLngs();
+    updateMapFromPolyLine(polyline)
+/*    const latlngs = polyline.layer.getLatLngs();
     latlngs.push(L.latLng(main1024Pos.y, main1024Pos.x));
-    polyline.layer.setLatLngs(latlngs);
+    polyline.layer.setLatLngs(latlngs);*/
   }
 }
 
@@ -401,15 +457,7 @@ function selectPoint(record, rowIndex) {
   // 将地图视图居中到选中的点
   map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
 }
-//本地存储
-const saveLocal = (k,v) => {
-  localStorage.setItem("bgiMap"+k, JSON.stringify(v));
-}
-const loadLocal = (k) => {
-  const  val=localStorage.getItem("bgiMap"+k);
-  if(!val) return val;
-  return JSON.parse(val) ;
-}
+
 
 //战斗策略管理
 console.log('vue')
@@ -498,7 +546,7 @@ const combatScriptColumns = [
     </a-layout-sider>
     <a-layout-content>
       <a-space direction="vertical" size="large" fill>
-        <a-card title="路径列表">
+        <a-card title="路径列表" style="max-height: 400px;overflow-y: auto">
           <template #extra>
             <a-button @click="importPositions" type="primary" size="small">导入路径</a-button>
           </template>
@@ -527,6 +575,7 @@ const combatScriptColumns = [
             :draggable="{ type: 'handle', width: 40 }"
             @change="handleChange"
             @row-click="selectPoint"
+            :row-class="setPositionRowClass"
           >
             <template #drag-handle-icon>
               <icon-drag-dot-vertical />
@@ -576,6 +625,17 @@ const combatScriptColumns = [
               >
                 删除
               </a-button>
+
+
+              <a-dropdown @select="moreSelect" >
+                <a-button style="margin-left: 10px"  status="success" >更多</a-button>
+                <template #content>
+                  <a-doption :value="{ onclick: copyPosition,record,rowIndex}">复制</a-doption>
+                  <a-doption :value="{ onclick: lockRowIndex,record,rowIndex}" v-if="!record.locked">锁定行</a-doption>
+                  <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}"  v-if="record.locked">解锁行</a-doption>
+                </template>
+              </a-dropdown>            
+              <sapn style="color:red"  v-if="record.locked">↑↑↑</sapn>
             </template>
           </a-table>
 
@@ -595,6 +655,8 @@ const combatScriptColumns = [
       @ok="saveCombatScript"
       @cancel="showCombatScriptManagerModal = false"
       width="50%" height="50%"
+      hideCancel
+      okText="关闭"
   >
 
     <a-space direction="vertical" size="large" fill>
@@ -688,7 +750,11 @@ const columns = [
   { title: '操作', slotName: 'operations' },
 ];
 </script>
-
+<style scoped>
+:deep(.arco-table-tr.locked td){
+  border-top: 2px red solid;
+}
+</style>
 <style>
 .layout {
   height: 100vh;
