@@ -312,6 +312,7 @@ const actionOptions = [
   { label: '水元素力采集', value: 'hydro_collect' },
   { label: '雷元素力采集', value: 'electro_collect' },
   { label: '风元素力采集', value: 'anemo_collect' },
+  { label: '火元素力采集', value: 'pyro_collect' },
   { label: '执行战斗策略', value: 'combat_script' },
 ];
 
@@ -633,6 +634,7 @@ const combatScriptColumns = [
                 <a-option value="teleport">传送</a-option>
                 <a-option value="path">途经</a-option>
                 <a-option value="target">目标</a-option>
+                <a-option value="orientation">朝向</a-option>
               </a-select>
             </template>
             <template #operations="{ record, rowIndex }">
