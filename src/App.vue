@@ -203,7 +203,7 @@ function updatePolyline(layer) {
   if (index !== -1) {
     const currentPositions = polylines.value[index].positions;
     const newLatLngs = layer.getLatLngs();
-    
+
     if (currentPositions.length === newLatLngs.length) {
       // 如果长度没有变化，直接更新对应索引下的 x, y 数据
       currentPositions.forEach((pos, idx) => {
@@ -314,11 +314,12 @@ const actionOptions = [
   { label: '风元素力采集', value: 'anemo_collect' },
   { label: '火元素力采集', value: 'pyro_collect' },
   { label: '执行战斗策略', value: 'combat_script' },
+  { label: '钓鱼', value: 'fishing' },
 ];
 
 function handleChange(newData) {
   const polyline = polylines.value[selectedPolylineIndex.value];
-  
+
   // 更新位置数据
   polyline.positions = newData.map((item, index) => ({
     ...item,
@@ -349,7 +350,7 @@ function unlockRowIndex(record,rowIndex){
 }
 
 const setPositionRowClass=(record,rowIndex)=>{
-  
+
   if (record.locked){
     return "locked";
   }
@@ -388,13 +389,13 @@ function clearPoints(){
     cancelText: '取消',
     onOk: () => {
       polylines.value[selectedPolylineIndex.value].positions=[];
-      
+
     },
     onCancel: () => {
-      
+
     },
   });
-  
+
 }
 function addNewPoint(x, y) {
   const main1024Pos = gameToMain1024(x, y);
@@ -430,7 +431,7 @@ function addNewPoint(x, y) {
     }else{
       polyline.positions.push(newPoint);
     }
-    
+
 
     // 更新地图上的折线
     updateMapFromPolyLine(polyline)
@@ -459,7 +460,7 @@ function selectPoint(record, rowIndex) {
 
   // 高亮选中的点
   const main1024Pos = gameToMain1024(record.x, record.y);
-  
+
   // 创建新的高亮标记
   highlightMarker.value = L.marker([main1024Pos.y, main1024Pos.x], {
     icon: L.divIcon({
@@ -471,7 +472,7 @@ function selectPoint(record, rowIndex) {
   }).addTo(map.value);
 
   selectedPointIndex.value = rowIndex;
-  
+
   // 将地图视图居中到选中的点
   map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
 }
@@ -494,7 +495,7 @@ const saveCombatScript=()=>{
   //const val=[{value:"钟离 e(hold);坎蒂丝 e(hold);雷泽 e(hold);卡齐娜 e;凝光 attack(0.2),attack(0.2),attack(0.2),attack(0.2),attack(0.2)",def:true}];
  // saveLocal(combatScriptKey,val);
   //combatScriptData.value=getCombatScriptByLocal();
-  
+
 }
 //默认战斗策略赋值
 const actionChange = (record) => {
@@ -520,9 +521,9 @@ const addCombatScript=()=>{
     newActionParams.value={value:"",def:false};
     combatScriptData.value=[...temp,newActionParamsTemp];
     saveLocal(combatScriptKey,combatScriptData.value);
-    
+
   }
-  
+
 }
 const deleteCombatScriptPosition=index=>{
   combatScriptData.value.splice(index,1);
@@ -586,9 +587,9 @@ const combatScriptColumns = [
           </a-list>
         </a-card>
         <a-card :title="`点位信息 - ${selectedPolyline.name || '未选择路径'}`">
-          <a-table 
-            :columns="columns" 
-            :data="selectedPolyline.positions" 
+          <a-table
+            :columns="columns"
+            :data="selectedPolyline.positions"
             :pagination="false"
             :draggable="{ type: 'handle', width: 40 }"
             @change="handleChange"
@@ -599,14 +600,14 @@ const combatScriptColumns = [
               <icon-drag-dot-vertical />
             </template>
             <template #x="{ record, rowIndex }">
-              <a-input-number 
-                v-model="record.x" 
+              <a-input-number
+                v-model="record.x"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
               />
             </template>
             <template #y="{ record, rowIndex }">
-              <a-input-number 
-                v-model="record.y" 
+              <a-input-number
+                v-model="record.y"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'y', value)"
               />
             </template>
@@ -627,7 +628,7 @@ const combatScriptColumns = [
                 </a-option>
               </a-select>
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
-              
+
             </template>
             <template #type="{ record }">
               <a-select v-model="record.type">
@@ -638,9 +639,9 @@ const combatScriptColumns = [
               </a-select>
             </template>
             <template #operations="{ record, rowIndex }">
-              <a-button 
-                @click="deletePosition(rowIndex)" 
-                status="danger" 
+              <a-button
+                @click="deletePosition(rowIndex)"
+                status="danger"
                 size="small"
               >
                 删除
@@ -654,7 +655,7 @@ const combatScriptColumns = [
                   <a-doption :value="{ onclick: lockRowIndex,record,rowIndex}" v-if="!record.locked">锁定行</a-doption>
                   <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}"  v-if="record.locked">解锁行</a-doption>
                 </template>
-              </a-dropdown>            
+              </a-dropdown>
               <sapn style="color:red"  v-if="record.locked">↑↑↑</sapn>
             </template>
           </a-table>
@@ -669,7 +670,7 @@ const combatScriptColumns = [
     </a-layout-content>
   </a-layout>
   <!-- 战斗策略管理 -->
-  
+
   <a-modal
       v-model:visible="showCombatScriptManagerModal"
       title="战斗策略管理"
@@ -682,7 +683,7 @@ const combatScriptColumns = [
 
     <a-space direction="vertical" size="large" fill>
       <a-card >
-       
+
         <a-table :columns="combatScriptColumns" :data="combatScriptData"  :pagination="false">
           <template #def="{ record, rowIndex }">
             <a-checkbox :value="true" v-model="record.def"  @change="changeCombatScriptDef(rowIndex)"></a-checkbox>
@@ -696,14 +697,14 @@ const combatScriptColumns = [
               删除
             </a-button>
           </template>
-          
+
         </a-table>
         <template #extra>
           <a-button @click="showAddCombatScript = true" type="primary" size="small" style="margin-left: 20px;">添加</a-button>
         </template>
       </a-card>
     </a-space>
-    
+
   </a-modal>
   <!-- 添加战斗策略 -->
   <a-modal
@@ -721,7 +722,7 @@ const combatScriptColumns = [
       </a-form-item>
     </a-form>
   </a-modal>
-  
+
   <!-- 添加点位的模态框 -->
   <a-modal
     v-model:visible="showAddPointModal"
@@ -805,6 +806,6 @@ const columns = [
 }
 
 .arco-table .arco-table-cell {
-    padding: 8px 8px !important; 
+    padding: 8px 8px !important;
 }
 </style>
