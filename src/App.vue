@@ -315,6 +315,7 @@ const actionOptions = [
   { label: '火元素力采集', value: 'pyro_collect' },
   { label: '执行战斗策略', value: 'combat_script' },
   { label: '钓鱼', value: 'fishing' },
+  { label: '挖矿', value: 'mining' },
 ];
 
 function handleChange(newData) {
@@ -619,6 +620,7 @@ const combatScriptColumns = [
                 <a-option value="fly">飞行</a-option>
                 <a-option value="swim">游泳</a-option>
                 <a-option value="climb">攀爬</a-option>
+                <a-option value="jump">跳跃</a-option>
               </a-select>
             </template>
             <template #action="{ record }">
@@ -627,6 +629,7 @@ const combatScriptColumns = [
                   {{ option.label }}
                 </a-option>
               </a-select>
+              <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"  placeholder="录入下落攻击等待时间(毫秒)" strict />
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
 
             </template>
