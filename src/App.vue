@@ -316,6 +316,7 @@ const actionOptions = [
   { label: '执行战斗策略', value: 'combat_script' },
   { label: '钓鱼', value: 'fishing' },
   { label: '挖矿', value: 'mining' },
+  { label: '在遮罩窗口输出日志', value: 'log_output' },
 ];
 
 function handleChange(newData) {
@@ -629,6 +630,7 @@ const combatScriptColumns = [
                   {{ option.label }}
                 </a-option>
               </a-select>
+              <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params" :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志" strict />
               <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"  placeholder="录入下落攻击等待时间(毫秒)" strict />
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
 
