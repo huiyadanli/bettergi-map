@@ -45,6 +45,7 @@ const currentMapName = ref('Teyvat');
 const currentMapConfig = computed(() => mapConfigs[currentMapName.value]);
 const coordinateConverter = ref(new CoordinateConverter(currentMapConfig.value));
 const mapImage = ref(currentMapConfig.value.mapImage);
+const isMapLoaded = ref(false);
 
 
 // 修改这一行
@@ -83,11 +84,13 @@ onMounted(() => {
 });
 
 function loadMapImageAndInit(mapImageSrc) {
+  isMapLoaded.value = false; // 地图加载开始
   const img = new Image();
   img.onload = function () {
     imageWidth.value = this.width;
     imageHeight.value = this.height;
-    initMap(); // Call the provided callback (e.g., initMap)
+    initMap();
+    isMapLoaded.value = true; // 地图加载完成
   };
   img.src = mapImageSrc;
 }
@@ -150,22 +153,35 @@ function initMap() {
 
 // 切换地图
 function switchMap(mapName) {
-  currentMapName.value = mapName;
-  coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
-  mapImage.value = currentMapConfig.value.mapImage;
+  return new Promise((resolve) => {
+    currentMapName.value = mapName;
+    coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
+    mapImage.value = currentMapConfig.value.mapImage;
 
-  // 清空地图上的折线和点位
-  polylines.value = [];
-  if (map.value) {
-    map.value.eachLayer((layer) => {
-      if (layer instanceof L.Polyline || layer instanceof L.Marker) {
-        map.value.removeLayer(layer);
+    // 清空地图上的折线和点位
+    polylines.value = [];
+    if (map.value) {
+      map.value.eachLayer((layer) => {
+        if (layer instanceof L.Polyline || layer instanceof L.Marker) {
+          map.value.removeLayer(layer);
+        }
+      });
+    }
+
+    // 重新加载地图
+    loadMapImageAndInit(mapImage.value);
+
+    // 使用轮询检查地图是否加载完成
+    const checkMapLoaded = () => {
+      if (isMapLoaded.value) {
+        resolve();
+      } else {
+        requestAnimationFrame(checkMapLoaded); // 继续检查
       }
-    });
-  }
+    };
 
-  // 重新加载地图
-  loadMapImageAndInit(mapImage.value);
+    checkMapLoaded(); // 开始检查
+  });
 }
 
 function removeHighlightMarker() {
@@ -210,10 +226,10 @@ function addPolyline(layer, name = "未命名路径") {
 }
 
 // 处理导入的数据
-function addImportedPolyline(importedData) {
+async function addImportedPolyline(importedData) {
   const mapName = importedData.info.mapName || 'Teyvat'; // 默认地图为 Teyvat
   if (mapName !== currentMapName.value && mapConfigs[mapName]) {
-    switchMap(mapName); // 仅在地图不一致时切换
+    await switchMap(mapName); // 仅在地图不一致时切换
   }
   const positions = importedData.positions.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
