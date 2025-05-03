@@ -4,12 +4,47 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
-import { gameToMain1024, main1024ToGame } from './utils/coordinateConverter';
+import { CoordinateConverter } from './utils/coordinateConverter';
 import { Modal } from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
+
+// 地图配置
+const mapConfigs = {
+  Teyvat: {
+    gameMapRows: 13,
+    gameMapCols: 18,
+    gameMapUpRows: 5,
+    gameMapLeftCols: 11,
+    gameMapBlockWidth: 1024,
+    mapImage: './1024_map.jpg',
+  },
+  TheChasm: {
+    gameMapRows: 2,
+    gameMapCols: 2,
+    gameMapUpRows: 1,
+    gameMapLeftCols: 1,
+    gameMapBlockWidth: 1024,
+    mapImage: './thechasm_1024_map.jpg',
+  },
+  Enkanomiya: {
+    gameMapRows: 3,
+    gameMapCols: 3,
+    gameMapUpRows: 1,
+    gameMapLeftCols: 1,
+    gameMapBlockWidth: 1024,
+    mapImage: './enkanomiya_1024_map.jpg',
+  },
+};
+
+// 当前地图相关变量
+const currentMapName = ref('Teyvat');
+const currentMapConfig = computed(() => mapConfigs[currentMapName.value]);
+const coordinateConverter = ref(new CoordinateConverter(currentMapConfig.value));
+const mapImage = ref(currentMapConfig.value.mapImage);
+
+
 // 修改这一行
-const mapImage = ref('./1024_map.jpg');
 const imageWidth = ref(0);
 const imageHeight = ref(0);
 const map = ref(null);
@@ -41,16 +76,25 @@ const loadLocal = (k) => {
 }
 
 onMounted(() => {
-  const img = new Image();
-  img.onload = function() {
-    imageWidth.value = this.width;
-    imageHeight.value = this.height;
-    initMap();
-  }
-  img.src = mapImage.value;
+  loadMapImageAndInit(mapImage.value);
 });
 
+function loadMapImageAndInit(mapImageSrc) {
+  const img = new Image();
+  img.onload = function () {
+    imageWidth.value = this.width;
+    imageHeight.value = this.height;
+    initMap(); // Call the provided callback (e.g., initMap)
+  };
+  img.src = mapImageSrc;
+}
+
 function initMap() {
+  // Check if the map instance already exists
+  if (map.value) {
+    map.value.remove(); // Destroy the existing map instance
+    map.value = null;   // Reset the map reference
+  }
 
   map.value = L.map('map', {
     attributionControl: false,
@@ -101,6 +145,26 @@ function initMap() {
   });
 }
 
+// 切换地图
+function switchMap(mapName) {
+  currentMapName.value = mapName;
+  coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
+  mapImage.value = currentMapConfig.value.mapImage;
+
+  // 清空地图上的折线和点位
+  polylines.value = [];
+  if (map.value) {
+    map.value.eachLayer((layer) => {
+      if (layer instanceof L.Polyline || layer instanceof L.Marker) {
+        map.value.removeLayer(layer);
+      }
+    });
+  }
+
+  // 重新加载地图
+  loadMapImageAndInit(mapImage.value);
+}
+
 function removeHighlightMarker() {
   if (highlightMarker.value) {
     map.value.removeLayer(highlightMarker.value);
@@ -119,7 +183,7 @@ function addPolyline(layer, name = "未命名路径") {
     name: name,
     layer: layer,
     positions: layer.getLatLngs().map((latlng, index) => {
-      const gamePos = main1024ToGame(latlng.lng, latlng.lat);
+      const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
       return {
         id: index + 1,
         action: "",
@@ -142,17 +206,21 @@ function addPolyline(layer, name = "未命名路径") {
   selectPolyline(selectedPolylineIndex.value);
 }
 
-// 新增一个函数来处理导入的数据
+// 处理导入的数据
 function addImportedPolyline(importedData) {
-  const positions = importedData.positions.map(pos => {
-    const main1024Pos = gameToMain1024(pos.x, pos.y);
+  const mapName = importedData.info.mapName || 'Teyvat'; // 默认地图为 Teyvat
+  if (mapName !== currentMapName.value && mapConfigs[mapName]) {
+    switchMap(mapName); // 仅在地图不一致时切换
+  }
+  const positions = importedData.positions.map((pos) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   const layer = L.polyline(positions, {
     color: 'red',
-    weight: 3
+    weight: 3,
   }).addTo(map.value);
-  layer.on("pm:edit", handleMapPointChange);
+  layer.on('pm:edit', handleMapPointChange);
 
   const newPolyline = {
     name: importedData.info.name,
@@ -161,12 +229,12 @@ function addImportedPolyline(importedData) {
       id: index + 1,
       x: pos.x,
       y: pos.y,
-      action: pos.action || "",
-      move_mode: pos.move_mode || "walk",
-      action_params:pos.action_params,
-      type: pos.type || "path"
+      action: pos.action || '',
+      move_mode: pos.move_mode || 'walk',
+      action_params: pos.action_params,
+      type: pos.type || 'path',
     })),
-    info: importedData.info // 保留导入时的信息
+    info: importedData.info,
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -207,14 +275,14 @@ function updatePolyline(layer) {
     if (currentPositions.length === newLatLngs.length) {
       // 如果长度没有变化，直接更新对应索引下的 x, y 数据
       currentPositions.forEach((pos, idx) => {
-        const gamePos = main1024ToGame(newLatLngs[idx].lng, newLatLngs[idx].lat);
+        const gamePos = coordinateConverter.value.main1024ToGame(newLatLngs[idx].lng, newLatLngs[idx].lat);
         pos.x = gamePos.x;
         pos.y = gamePos.y;
       });
     } else {
       // 如果长度发生变化，进行匹配更新
       const updatedPositions = newLatLngs.map((latlng, idx) => {
-        const gamePos = main1024ToGame(latlng.lng, latlng.lat);
+        const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
         const existingPosition = currentPositions.find(pos => pos.x === gamePos.x && pos.y === gamePos.y);
         return {
           ...existingPosition, // 保留原有数据
@@ -247,6 +315,7 @@ function handleExport() {
       author: exportAuthor.value, // 使用用户输入的作者信息
       version: exportVersion.value, // 使用用户输入的版本信息
       description: exportDescription.value, // 添加描述信息
+      mapName: currentMapName.value, // 添加地图名字
       bgiVersion: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
@@ -288,7 +357,7 @@ function deletePolyline(index) {
 function updateMapFromTable(polylineIndex, positionIndex) {
   const polyline = polylines.value[polylineIndex];
   const position = polyline.positions[positionIndex];
-  const main1024Pos = gameToMain1024(position.x, position.y);
+  const main1024Pos = coordinateConverter.value.gameToMain1024(position.x, position.y);
   const latlngs = polyline.layer.getLatLngs();
   latlngs[positionIndex] = L.latLng(main1024Pos.y, main1024Pos.x);
   polyline.layer.setLatLngs(latlngs);
@@ -328,7 +397,7 @@ function handleChange(newData) {
 
   // 更新地图上的折线
   const latlngs = newData.map(pos => {
-    const main1024Pos = gameToMain1024(pos.x, pos.y);
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   polyline.layer.setLatLngs(latlngs);
@@ -369,7 +438,7 @@ const updateMapFromPolyLine=(polyline)=>{
   polyline.positions.forEach((item,index)=>item.id=index+1);
   //更新折线图
   const latlngs = polyline.positions.map(pos => {
-    const main1024Pos = gameToMain1024(pos.x, pos.y);
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   polyline.layer.setLatLngs(latlngs);
@@ -398,7 +467,7 @@ function clearPoints(){
 
 }
 function addNewPoint(x, y) {
-  const main1024Pos = gameToMain1024(x, y);
+  const main1024Pos = coordinateConverter.value.gameToMain1024(x, y);
   const newPoint = {
     id: 1,
     x: x,
@@ -459,7 +528,7 @@ function selectPoint(record, rowIndex) {
   }
 
   // 高亮选中的点
-  const main1024Pos = gameToMain1024(record.x, record.y);
+  const main1024Pos = coordinateConverter.value.gameToMain1024(record.x, record.y);
 
   // 创建新的高亮标记
   highlightMarker.value = L.marker([main1024Pos.y, main1024Pos.x], {
@@ -565,6 +634,14 @@ const combatScriptColumns = [
     </a-layout-sider>
     <a-layout-content>
       <a-space direction="vertical" size="large" fill>
+        <!-- 地图选择框 -->
+        <a-card title="地图选择">
+          <a-select v-model="currentMapName" @change="switchMap" style="width: 200px;">
+            <a-option v-for="(config, name) in mapConfigs" :key="name" :value="name">
+              {{ name }}
+            </a-option>
+          </a-select>
+        </a-card>
         <a-card title="路径列表" style="max-height: 400px;overflow-y: auto">
           <template #extra>
             <a-button @click="importPositions" type="primary" size="small">导入路径</a-button>

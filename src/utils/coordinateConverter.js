@@ -1,44 +1,65 @@
-const GameMapRows = 13; // 游戏坐标下地图块的行数
-const GameMapCols = 18; // 游戏坐标下地图块的列数
-
-// 游戏坐标下 左上角离地图原点的行数
-const GameMapUpRows = 5;
-
-// 游戏坐标下 左上角离地图原点的列数
-const GameMapLeftCols = 11;
-
-// 游戏地图块的长宽
-const GameMapBlockWidth = 1024;
-
 /**
- * 原神游戏坐标系 -> 主地图1024区块坐标系
- * @param {number} x - 游戏坐标系的x坐标
- * @param {number} y - 游戏坐标系的y坐标
- * @returns {Object} - 包含x和y坐标的对象
+ * 坐标转换器类
  */
-export function gameToMain1024(x, y) {
-    // 转换1024区块坐标，大地图坐标系正轴是往左上方向的
-    // 这里写最左上角的区块坐标(GameMapUpRows, GameMapLeftCols)/(上, 左), 截止4.5版本，最左上角的区块坐标是(5, 7)
+export class CoordinateConverter {
+  /**
+   * @param {object} config - 地图配置
+   * @param {number} config.gameMapRows - 游戏坐标下地图块的行数
+   * @param {number} config.gameMapCols - 游戏坐标下地图块的列数
+   * @param {number} config.gameMapUpRows - 游戏坐标下 左上角离地图原点的行数
+   * @param {number} config.gameMapLeftCols - 游戏坐标下 左上角离地图原点的列数
+   * @param {number} config.gameMapBlockWidth - 游戏地图块的长宽
+   */
+  constructor(config) {
+    this.GameMapRows = config.gameMapRows;
+    this.GameMapCols = config.gameMapCols;
+    this.GameMapUpRows = config.gameMapUpRows;
+    this.GameMapLeftCols = config.gameMapLeftCols;
+    this.GameMapBlockWidth = config.gameMapBlockWidth;
+  }
 
+  /**
+   * 原神游戏坐标系 -> 主地图1024区块坐标系
+   * @param {number} x - 游戏坐标系的x坐标
+   * @param {number} y - 游戏坐标系的y坐标
+   * @returns {Object} - 包含x和y坐标的对象
+   */
+  gameToMain1024(x, y) {
     return {
-        x: (GameMapLeftCols + 1) * GameMapBlockWidth - x,
-        y: transformOriginY((GameMapUpRows + 1) * GameMapBlockWidth - y)
+      x: (this.GameMapLeftCols + 1) * this.GameMapBlockWidth - x,
+      y: this.transformOriginY((this.GameMapUpRows + 1) * this.GameMapBlockWidth - y)
     };
-}
+  }
 
-/**
- * 主地图1024区块坐标系 -> 原神游戏坐标系
- * @param {number} x - 主地图1024区块坐标系的x坐标
- * @param {number} y - 主地图1024区块坐标系的y坐标
- * @returns {Object} - 包含x和y坐标的对象
- */
-export function main1024ToGame(x, y) {
+  /**
+   * 主地图1024区块坐标系 -> 原神游戏坐标系
+   * @param {number} x - 主地图1024区块坐标系的x坐标
+   * @param {number} y - 主地图1024区块坐标系的y坐标
+   * @returns {Object} - 包含x和y坐标的对象
+   */
+  main1024ToGame(x, y) {
     return {
-        x: (GameMapLeftCols + 1) * GameMapBlockWidth - x,
-        y: (GameMapUpRows + 1) * GameMapBlockWidth - transformOriginY(y)
+      x: (this.GameMapLeftCols + 1) * this.GameMapBlockWidth - x,
+      y: (this.GameMapUpRows + 1) * this.GameMapBlockWidth - this.transformOriginY(y)
     };
+  }
+
+  /**
+   * 转换Y坐标原点
+   * @param {number} y - Y坐标
+   * @returns {number} - 转换后的Y坐标
+   */
+  transformOriginY(y) {
+    return this.GameMapRows * this.GameMapBlockWidth - y;
+  }
 }
 
-export function transformOriginY(y) {
-    return GameMapRows * GameMapBlockWidth - y;
-}
+// 默认导出 Teyvat 地图的转换器实例（如果需要保持旧的导入方式兼容性）
+// 或者在使用时根据地图类型动态创建实例
+// export const teyvatConverter = new CoordinateConverter({
+//   gameMapRows: 13,
+//   gameMapCols: 18,
+//   gameMapUpRows: 5,
+//   gameMapLeftCols: 11,
+//   gameMapBlockWidth: 1024
+// });
