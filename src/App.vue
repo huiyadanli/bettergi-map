@@ -354,8 +354,8 @@ function handleExport() {
       author: exportAuthor.value, // 使用用户输入的作者信息
       version: exportVersion.value, // 使用用户输入的版本信息
       description: exportDescription.value, // 添加描述信息
-      mapName: currentMapName.value, // 添加地图名字
-      bgiVersion: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
+      map_name: currentMapName.value, // 添加地图名字
+      bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
