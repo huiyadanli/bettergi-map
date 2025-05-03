@@ -18,6 +18,7 @@ const mapConfigs = {
     gameMapLeftCols: 11,
     gameMapBlockWidth: 1024,
     mapImage: './1024_map.jpg',
+    displayName: '提瓦特大陆',
   },
   TheChasm: {
     gameMapRows: 2,
@@ -26,6 +27,7 @@ const mapConfigs = {
     gameMapLeftCols: 1,
     gameMapBlockWidth: 1024,
     mapImage: './thechasm_1024_map.jpg',
+    displayName: '层岩巨渊',
   },
   Enkanomiya: {
     gameMapRows: 3,
@@ -34,6 +36,7 @@ const mapConfigs = {
     gameMapLeftCols: 1,
     gameMapBlockWidth: 1024,
     mapImage: './enkanomiya_1024_map.jpg',
+    displayName: '渊下宫',
   },
 };
 
@@ -637,17 +640,17 @@ const combatScriptColumns = [
     </a-layout-sider>
     <a-layout-content>
       <a-space direction="vertical" size="large" fill>
-        <!-- 地图选择框 -->
-        <a-card title="地图选择">
-          <a-select v-model="currentMapName" @change="switchMap" style="width: 200px;">
-            <a-option v-for="(config, name) in mapConfigs" :key="name" :value="name">
-              {{ name }}
-            </a-option>
-          </a-select>
-        </a-card>
         <a-card title="路径列表" style="max-height: 400px;overflow-y: auto">
           <template #extra>
-            <a-button @click="importPositions" type="primary" size="small">导入路径</a-button>
+            <a-space>
+              <!-- 地图选择框 -->
+              <a-select v-model="currentMapName" @change="switchMap" style="width: 160px; margin-right: 10px">
+                <a-option v-for="(config, name) in mapConfigs" :key="name" :value="name">
+                  {{ config.displayName }}
+                </a-option>
+              </a-select>
+              <a-button @click="importPositions" type="primary" size="small">导入路径</a-button>
+            </a-space>
           </template>
           <a-list :data="polylines" :bordered="false">
             <template #item="{ item, index }">
