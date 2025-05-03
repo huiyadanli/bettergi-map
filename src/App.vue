@@ -374,16 +374,19 @@ const actionOptions = [
   { label: '无', value: '' },
   { label: '下落攻击', value: 'stop_flying' },
   { label: '强制传送', value: 'force_tp' },
-  { label: '纳西妲长E收集', value: 'nahida_collect' },
-  { label: '战斗', value: 'fight' },
-  { label: '在附近拾取', value: 'pick_around' },
   { label: '四叶印', value: 'up_down_grab_leaf' },
+  { label: '挖矿', value: 'mining' },
+  { label: '钓鱼', value: 'fishing' },
+  { label: '战斗', value: 'fight' },
+  { label: '执行战斗策略', value: 'combat_script' },
+  { label: '在附近拾取', value: 'pick_around' },
+  { label: '纳西妲长E收集', value: 'nahida_collect' },
   { label: '水元素力采集', value: 'hydro_collect' },
   { label: '雷元素力采集', value: 'electro_collect' },
   { label: '风元素力采集', value: 'anemo_collect' },
   { label: '火元素力采集', value: 'pyro_collect' },
-  { label: '执行战斗策略', value: 'combat_script' },
-  { label: '钓鱼', value: 'fishing' },
+  { label: '在遮罩窗口输出日志', value: 'log_output' },
+  { label: '退至登录页面重新登录', value: 'exit_and_relogin' },
 ];
 
 function handleChange(newData) {
@@ -696,6 +699,7 @@ const combatScriptColumns = [
                 <a-option value="fly">飞行</a-option>
                 <a-option value="swim">游泳</a-option>
                 <a-option value="climb">攀爬</a-option>
+                <a-option value="jump">跳跃</a-option>
               </a-select>
             </template>
             <template #action="{ record }">
@@ -704,6 +708,8 @@ const combatScriptColumns = [
                   {{ option.label }}
                 </a-option>
               </a-select>
+              <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params" :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志" strict />
+              <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"  placeholder="录入下落攻击等待时间(毫秒)" strict />
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
 
             </template>
