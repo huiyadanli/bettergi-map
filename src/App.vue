@@ -247,7 +247,7 @@ function addPolyline(layer, name = "未命名路径") {
 
 // 处理导入的数据
 async function addImportedPolyline(importedData) {
-  const mapName = importedData.info.mapName || 'Teyvat'; // 默认地图为 Teyvat
+  const mapName = importedData.info.map_name || 'Teyvat'; // 默认地图为 Teyvat
   if (mapName !== currentMapName.value && mapConfigs[mapName]) {
     await switchMap(mapName); // 仅在地图不一致时切换
   }
