@@ -80,6 +80,25 @@ const loadLocal = (k) => {
 }
 
 onMounted(() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const mapParam = urlParams.get('map');
+
+  if (mapParam && mapConfigs[mapParam]) {
+    currentMapName.value = mapParam;
+    currentMapConfig.value = mapConfigs[mapParam];
+    coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
+    mapImage.value = currentMapConfig.value.mapImage;
+  }
+
+  // Remove the map parameter from the URL
+  urlParams.delete('map');
+  let p = urlParams.toString();
+  let newUrl = `${window.location.pathname}?${p}`;
+  if (p.length === 0){
+    newUrl = `${window.location.pathname}`;
+  }
+  window.history.replaceState(null, '', newUrl);
+
   loadMapImageAndInit(mapImage.value);
 });
 
@@ -155,6 +174,7 @@ function initMap() {
 function switchMap(mapName) {
   return new Promise((resolve) => {
     currentMapName.value = mapName;
+    currentMapConfig.value = mapConfigs[mapName];
     coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
     mapImage.value = currentMapConfig.value.mapImage;
 
