@@ -173,6 +173,8 @@ function initMap() {
 // 切换地图
 function switchMap(mapName) {
   return new Promise((resolve) => {
+    changeBgiMapSettingsName(mapName);
+
     currentMapName.value = mapName;
     currentMapConfig.value = mapConfigs[mapName];
     coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
@@ -202,6 +204,16 @@ function switchMap(mapName) {
 
     checkMapLoaded(); // 开始检查
   });
+}
+
+function changeBgiMapSettingsName(mapName) {
+  try {
+    const mapEditorWebBridge = chrome.webview.hostObjects.mapEditorWebBridge;
+    const jsonString = mapEditorWebBridge.ChangeMapName(mapName);
+    return JSON.parse(jsonString);
+  } catch (e) {
+    console.log("切换bgi地图配置失败，如果是在线版，请无视这个提示。");
+  }
 }
 
 function removeHighlightMarker() {
