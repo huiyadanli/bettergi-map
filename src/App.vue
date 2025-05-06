@@ -284,6 +284,7 @@ async function addImportedPolyline(importedData) {
       move_mode: pos.move_mode || 'walk',
       action_params: pos.action_params,
       type: pos.type || 'path',
+      point_ext_params: pos.point_ext_params || undefined
     })),
     info: importedData.info,
   };
@@ -678,6 +679,33 @@ const combatScriptColumns = [
     slotName:'operations'
   }]
 
+//点位扩展参数 
+//monster_tag  normal,elite,legendary
+//未识别，路径过远，所有
+//unrecognized,pathTooFar,all
+//取上一个识别到的点位置，大地图识别，特定时间到达
+//previousDetectedPoint,mapRecognition,scheduledArrival
+const defaultPointExtParams={misidentification:{type:["unrecognized"],handling_mode:"previousDetectedPoint",arrival_time:0},description:"",monster_tag:""};
+
+const pointExtParams=ref(Object.assign({},defaultPointExtParams));
+const showPointExtConfig=ref(false);
+let curPointRecord;
+const  editPointExtParams = (record,rowIndex)=>{
+  pointExtParams.value = record.point_ext_params || Object.assign({},JSON.parse(JSON.stringify(defaultPointExtParams)));
+  showPointExtConfig.value = true;
+  curPointRecord=record;
+}
+const  savePointExtParams = ()=>{
+ if (curPointRecord){
+   curPointRecord.point_ext_params= JSON.parse(JSON.stringify(pointExtParams.value));
+ }
+
+}
+const  deletePointExtParams = (record,rowIndex)=>{
+  delete record.point_ext_params;
+}
+
+
 
 </script>
 
@@ -729,6 +757,9 @@ const combatScriptColumns = [
           >
             <template #drag-handle-icon>
               <icon-drag-dot-vertical />
+            </template>
+            <template ##="{ record, rowIndex }">
+              {{record.id}}
             </template>
             <template #x="{ record, rowIndex }">
               <a-input-number
@@ -786,6 +817,8 @@ const combatScriptColumns = [
                 <a-button style="margin-left: 10px"  status="success" >更多</a-button>
                 <template #content>
                   <a-doption :value="{ onclick: copyPosition,record,rowIndex}">复制</a-doption>
+                  <a-doption :value="{ onclick: editPointExtParams,record,rowIndex}" >{{(record.point_ext_params?"修改":"新增") + "扩展参数"}}</a-doption>
+                  <a-doption :value="{ onclick: deletePointExtParams,record,rowIndex}"  v-if="record.point_ext_params">清除扩展参数</a-doption>
                   <a-doption :value="{ onclick: lockRowIndex,record,rowIndex}" v-if="!record.locked">锁定行</a-doption>
                   <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}"  v-if="record.locked">解锁行</a-doption>
                 </template>
@@ -804,7 +837,85 @@ const combatScriptColumns = [
     </a-layout-content>
   </a-layout>
   <!-- 战斗策略管理 -->
+  <!-- 添加战斗策略 -->
+  <a-modal
+      v-model:visible="showPointExtConfig"
+      title="扩展参数"
+      @ok="savePointExtParams"
+      @cancel="showPointExtConfig = false"
+      :width="800"
+  >
+    <a-form size="mini">
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="怪物标签：" size="mini"  tooltip="为此点位打上标签，后续可能根据怪物种类决定是否拾取设置等逻辑。">
+            <a-select v-model="pointExtParams.monster_tag" allow-clear> 
+              <a-option value="normal">小怪</a-option>
+              <a-option value="elite">精英</a-option>
+              <a-option value="legendary">传奇</a-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
 
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="异常识别：" size="mini" :content-flex="false" :merge-props="false" allow-clear  tooltip="当遇到点位无法识别时，用其他方式来解决无法识别的情况，编辑器如果无法识别点位，可以用编辑线的方式加点位。">
+
+            <a-space direction="vertical" fill>
+              <a-form-item field="misidentification.type" label="类型" tooltip="当小地图特征点比较少时，会出现点位无法识别或识别到其他位置的问题，
+              此选项决定在什么情况下处理。
+              未识别：算出坐标为0，即明面意思。
+              路径过远：识别到其他的坐标，从而算出路径过远。">
+                <a-select v-model="pointExtParams.misidentification.type" allow-clear multiple>
+                  <a-option value="unrecognized">未识别</a-option>
+                  <a-option value="pathTooFar">路径过远</a-option>
+                </a-select>
+              </a-form-item>
+              <a-row :gutter="8">
+                <a-col :span="12">
+                  <a-form-item field="misidentification.handling_mode" label="处理方式"  label-col-flex="100px" tooltip="
+取上一个识别到的点位置:即当未识别时，拿上一次能正确识别的点。
+大地图识别：即当未识别时，打开大地图，取中心点坐标，当中心点也识别不到时，取上一个识别到的点位。
+特定时间到达：自行估算到达时间，不会尝试获取从小地图获取坐标，适用于纯平地，最好时最后一个点位。
+">
+                    <a-select v-model="pointExtParams.misidentification.handling_mode" allow-clear>
+                      <a-option value="previousDetectedPoint">取上一个识别到的点位置</a-option>
+                      <a-option value="mapRecognition">大地图识别</a-option>
+<!--                      <a-option value="scheduledArrival">特定时间到达</a-option>-->
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item field="misidentification.arrival_time" >
+                    <a-input-number v-model="pointExtParams.misidentification.arrival_time" v-if="pointExtParams.misidentification.handling_mode === 'scheduledArrival'" placeholder="毫秒" class="input-demo" :min="0" allow-clear/>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-space>
+          </a-form-item>
+        </a-col>
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item field="description" label="描述：">
+            <a-textarea v-model="pointExtParams.description" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+
+
+
+      
+<!--      <a-form-item label="策略参数">
+        <a-input v-model="pointExtParams.enable"  allow-clear />
+      </a-form-item>
+      <a-form-item   label="是否默认">
+        <a-checkbox :value="true" v-model="pointExtParams.def"></a-checkbox>
+      </a-form-item>-->
+    </a-form>
+  </a-modal>
   <a-modal
       v-model:visible="showCombatScriptManagerModal"
       title="战斗策略管理"
