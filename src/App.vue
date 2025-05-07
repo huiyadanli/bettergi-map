@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { CoordinateConverter } from './utils/coordinateConverter';
-import { Modal } from '@arco-design/web-vue';
+import {Message, Modal} from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
 
@@ -275,6 +275,7 @@ async function addImportedPolyline(importedData) {
 
   const newPolyline = {
     name: importedData.info.name,
+    tags: importedData.info.tags || [],
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -369,6 +370,9 @@ function handleExport() {
       description: exportDescription.value, // 添加描述信息
       map_name: currentMapName.value, // 添加地图名字
       bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
+      ,tags:polyline.tags || []
+      ,last_modified_time:Date.now() //导出时间
+      
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
@@ -512,8 +516,9 @@ function clearPoints(){
     okText: '确认',
     cancelText: '取消',
     onOk: () => {
-      polylines.value[selectedPolylineIndex.value].positions=[];
-
+      if (polylines.value[selectedPolylineIndex.value]){
+        polylines.value[selectedPolylineIndex.value].positions=[];
+      }
     },
     onCancel: () => {
 
@@ -706,6 +711,98 @@ const  deletePointExtParams = (record,rowIndex)=>{
 }
 
 
+//标签管理
+const commonTagKey="_commonTag";
+const commonTag = ref([]);
+const showCommonTagManager = ref(false);
+const polylineTagsSelectIndex=ref(-1);
+const commonTagManagerModal = (index)=>{
+  commonTag.value = polylines.value[index].tags || [];
+  polylineTagsSelectIndex.value=index;
+  showCommonTagManager.value = true;
+}
+const saveCommonTagManagerModal = ()=>{
+  polylines.value[polylineTagsSelectIndex.value].tags=commonTag.value;
+}
+const commonTagChange = () => {
+  let tags=commonTag.value;
+  const newTags=[];
+  for (let i = 0; i < tags.length; i++) {
+    let tag=tags[i];
+    tag=tag.replaceAll("，",",");
+    tag.split(",").filter(t=>t).forEach(t=>newTags[newTags.length]=t);
+  }
+  commonTag.value=newTags;
+}
+
+//合并
+const mergedPolyline=()=>{
+
+  const newPos=[];
+  polylines.value.forEach(polyline=>{
+    polyline.positions.forEach(p=>{
+      newPos[newPos.length]=p;
+    });
+  });
+  polylines.value[0].positions=newPos;
+  for (let i = 1; i < polylines.value.length; i++) {
+    map.value.removeLayer(polylines.value[i].layer);
+  }
+  polylines.value=[polylines.value[0]];
+  updateMapFromPolyLine(polylines.value[0]);
+  selectPolyline(0);
+}
+//拆分
+const splitPolyline=()=>{
+
+  const  positions=polylines.value[selectedPolylineIndex.value].positions;
+  const result = [];
+
+  let currentGroup = [];
+
+  for (const position of positions) {
+    if (position.type === 'teleport') {
+      if (currentGroup.length > 0) {
+        result.push(currentGroup);
+        currentGroup = [];
+      }
+      currentGroup.push(position);
+    } else {
+      currentGroup.push(position);
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    result.push(currentGroup);
+  }
+
+
+  polylines.value[0].positions=result[0];
+  updateMapFromPolyLine(polylines.value[0]);
+  selectPolyline(0);
+  for (let i = 1; i < result.length; i++) {
+    let pl=Object.assign({},polylines.value[0],{positions:result[i]});
+    delete pl.layer;
+    pl=JSON.parse(JSON.stringify(pl));
+    pl.name = pl.name+"_"+(i+1);
+    addSpliePolyline(pl);
+    updateMapFromPolyLine(polylines.value[i]);
+    selectPolyline(i);
+  }
+
+}
+function addSpliePolyline(importedData) {
+  const layer = L.polyline(importedData.positions.map((pos) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  }), {
+    color: 'red',
+    weight: 3,
+  }).addTo(map.value);
+  layer.on('pm:edit', handleMapPointChange);
+  importedData.layer=layer;
+  polylines.value.push(importedData);
+}
 
 </script>
 
@@ -738,6 +835,7 @@ const  deletePointExtParams = (record,rowIndex)=>{
                     style="width: 150px;"
                   />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
+                  <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">标签管理</a-button>
                   <a-button @click="deletePolyline(index)" status="danger" size="small">删除</a-button>
                   <a-button @click="exportPositions(index)" type="secondary" size="small">导出</a-button>
                 </a-space>
@@ -758,8 +856,8 @@ const  deletePointExtParams = (record,rowIndex)=>{
             <template #drag-handle-icon>
               <icon-drag-dot-vertical />
             </template>
-            <template ##="{ record, rowIndex }">
-              {{record.id}}
+            <template #id="{ record, rowIndex }" >
+              <span :style="{color:(record.point_ext_params?'blue':'')}">{{record.id}}</span>
             </template>
             <template #x="{ record, rowIndex }">
               <a-input-number
@@ -829,6 +927,13 @@ const  deletePointExtParams = (record,rowIndex)=>{
 
           <template #extra>
             <a-button @click="clearPoints" type="primary" size="small" >清空</a-button>
+            <a-popconfirm  content="是否确认合并！"  @ok="mergedPolyline" okText="确认" cancelText="关闭">
+              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并</a-button>
+            </a-popconfirm>
+            <a-popconfirm  content="是否确认按传送点进行拆分！"  @ok="splitPolyline" okText="确认" cancelText="关闭">
+              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length == 1  && polylines[selectedPolylineIndex].positions.filter(item=>item.type=='teleport').length>1">拆分</a-button>
+            </a-popconfirm>
+
             <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">战斗策略管理</a-button>
             <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位</a-button>
           </template>
@@ -967,7 +1072,20 @@ const  deletePointExtParams = (record,rowIndex)=>{
       </a-form-item>
     </a-form>
   </a-modal>
-
+  <!-- 标签管理 -->
+  <a-modal
+      v-model:visible="showCommonTagManager"
+      title="标签管理"
+      @ok="saveCommonTagManagerModal"
+      @cancel="showCommonTagManager = false"
+      width="50%" height="50%"
+      okText="保存"
+      cancelText="关闭"
+  >
+    <a-input-tag v-model="commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+  </a-modal>
+  
+  
   <!-- 添加点位的模态框 -->
   <a-modal
     v-model:visible="showAddPointModal"
@@ -1008,7 +1126,7 @@ const  deletePointExtParams = (record,rowIndex)=>{
 
 <script>
 const columns = [
-  { title: '#', dataIndex: 'id' },
+  { title: '#', dataIndex: 'id' , slotName: 'id'},
   { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
   { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },
   { title: '类型', dataIndex: 'type', slotName: 'type' },
