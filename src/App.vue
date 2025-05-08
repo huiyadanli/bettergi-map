@@ -803,7 +803,36 @@ function addSpliePolyline(importedData) {
   importedData.layer=layer;
   polylines.value.push(importedData);
 }
+const showEditPointModal=ref(false);
+const curUpdatePosition=ref({});
+const curUpdatrowIndex=ref({});
 
+const editPointModal=(record,rowIndex)=>{
+  newPointX.value=record.x;
+  newPointY.value=record.y;
+  curUpdatePosition.value=record;
+  curUpdatrowIndex.value=rowIndex;
+  showEditPointModal.value = true;
+  selectPoint(record,rowIndex);
+};
+const updatePointModal=()=>{
+  curUpdatePosition.value.x=newPointX.value;
+  curUpdatePosition.value.y=newPointY.value;
+  showEditPointModal.value = false;
+  updateMapFromTable(selectedPolylineIndex.value,curUpdatrowIndex.value);
+  selectPoint(curUpdatePosition.value,curUpdatrowIndex.value);
+};
+function formatNumber(num) {
+  // 保留两位小数，但去掉多余的 0
+  let str = num.toFixed(2);
+  if (str.endsWith('.00')) {
+    return str.slice(0, -3);
+  } else if (str.endsWith('0')) {
+    return str.slice(0, -1);
+  } else {
+    return str;
+  }
+}
 </script>
 
 <template>
@@ -859,7 +888,10 @@ function addSpliePolyline(importedData) {
             <template #id="{ record, rowIndex }" >
               <span :style="{color:(record.point_ext_params?'blue':'')}">{{record.id}}</span>
             </template>
-            <template #x="{ record, rowIndex }">
+            <template #xy="{ record, rowIndex }" >
+              <a-button type="text" @click="editPointModal(record,rowIndex)">{{formatNumber(record.x)}}, {{formatNumber(record.y)}}</a-button>
+            </template>
+           <template #x="{ record, rowIndex }">
               <a-input-number
                 v-model="record.x"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
@@ -883,7 +915,7 @@ function addSpliePolyline(importedData) {
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-select v-model="record.action" @change="actionChange(record)">
+              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
                 <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
                   {{ option.label }}
                 </a-option>
@@ -1102,7 +1134,21 @@ function addSpliePolyline(importedData) {
       </a-form-item>
     </a-form>
   </a-modal>
-
+  <a-modal
+      v-model:visible="showEditPointModal"
+      title="修改点位坐标"
+      @ok="updatePointModal"
+      @cancel="showEditPointModal = false"
+  >
+    <a-form :model="{ x: newPointX, y: newPointY }">
+      <a-form-item field="x" label="X坐标">
+        <a-input-number v-model="newPointX" placeholder="请输入X坐标" />
+      </a-form-item>
+      <a-form-item field="y" label="Y坐标">
+        <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
   <!-- 导出模态框 -->
   <a-modal
     v-model:visible="showExportModal"
@@ -1127,8 +1173,9 @@ function addSpliePolyline(importedData) {
 <script>
 const columns = [
   { title: '#', dataIndex: 'id' , slotName: 'id'},
-  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
-  { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },
+  { title: '坐标', dataIndex: 'xy', slotName: 'xy' },
+/*  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
+  { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },*/
   { title: '类型', dataIndex: 'type', slotName: 'type' },
   { title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode' },
   { title: '动作', dataIndex: 'action', slotName: 'action' },
