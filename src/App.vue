@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { CoordinateConverter } from './utils/coordinateConverter';
-import { Modal } from '@arco-design/web-vue';
+import {Message, Modal} from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
 
@@ -275,6 +275,7 @@ async function addImportedPolyline(importedData) {
 
   const newPolyline = {
     name: importedData.info.name,
+    tags: importedData.info.tags || [],
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -284,6 +285,7 @@ async function addImportedPolyline(importedData) {
       move_mode: pos.move_mode || 'walk',
       action_params: pos.action_params,
       type: pos.type || 'path',
+      point_ext_params: pos.point_ext_params || undefined
     })),
     info: importedData.info,
   };
@@ -368,6 +370,9 @@ function handleExport() {
       description: exportDescription.value, // 添加描述信息
       map_name: currentMapName.value, // 添加地图名字
       bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
+      ,tags:polyline.tags || []
+      ,last_modified_time:Date.now() //导出时间
+      
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
@@ -511,8 +516,9 @@ function clearPoints(){
     okText: '确认',
     cancelText: '取消',
     onOk: () => {
-      polylines.value[selectedPolylineIndex.value].positions=[];
-
+      if (polylines.value[selectedPolylineIndex.value]){
+        polylines.value[selectedPolylineIndex.value].positions=[];
+      }
     },
     onCancel: () => {
 
@@ -678,7 +684,155 @@ const combatScriptColumns = [
     slotName:'operations'
   }]
 
+//点位扩展参数 
+//monster_tag  normal,elite,legendary
+//未识别，路径过远，所有
+//unrecognized,pathTooFar,all
+//取上一个识别到的点位置，大地图识别，特定时间到达
+//previousDetectedPoint,mapRecognition,scheduledArrival
+const defaultPointExtParams={misidentification:{type:["unrecognized"],handling_mode:"previousDetectedPoint",arrival_time:0},description:"",monster_tag:""};
 
+const pointExtParams=ref(Object.assign({},defaultPointExtParams));
+const showPointExtConfig=ref(false);
+let curPointRecord;
+const  editPointExtParams = (record,rowIndex)=>{
+  pointExtParams.value = record.point_ext_params || Object.assign({},JSON.parse(JSON.stringify(defaultPointExtParams)));
+  showPointExtConfig.value = true;
+  curPointRecord=record;
+}
+const  savePointExtParams = ()=>{
+ if (curPointRecord){
+   curPointRecord.point_ext_params= JSON.parse(JSON.stringify(pointExtParams.value));
+ }
+
+}
+const  deletePointExtParams = (record,rowIndex)=>{
+  delete record.point_ext_params;
+}
+
+
+//标签管理
+const commonTagKey="_commonTag";
+const commonTag = ref([]);
+const showCommonTagManager = ref(false);
+const polylineTagsSelectIndex=ref(-1);
+const commonTagManagerModal = (index)=>{
+  commonTag.value = polylines.value[index].tags || [];
+  polylineTagsSelectIndex.value=index;
+  showCommonTagManager.value = true;
+}
+const saveCommonTagManagerModal = ()=>{
+  polylines.value[polylineTagsSelectIndex.value].tags=commonTag.value;
+}
+const commonTagChange = () => {
+  let tags=commonTag.value;
+  const newTags=[];
+  for (let i = 0; i < tags.length; i++) {
+    let tag=tags[i];
+    tag=tag.replaceAll("，",",");
+    tag.split(",").filter(t=>t).forEach(t=>newTags[newTags.length]=t);
+  }
+  commonTag.value=newTags;
+}
+
+//合并
+const mergedPolyline=()=>{
+
+  const newPos=[];
+  polylines.value.forEach(polyline=>{
+    polyline.positions.forEach(p=>{
+      newPos[newPos.length]=p;
+    });
+  });
+  polylines.value[0].positions=newPos;
+  for (let i = 1; i < polylines.value.length; i++) {
+    map.value.removeLayer(polylines.value[i].layer);
+  }
+  polylines.value=[polylines.value[0]];
+  updateMapFromPolyLine(polylines.value[0]);
+  selectPolyline(0);
+}
+//拆分
+const splitPolyline=()=>{
+
+  const  positions=polylines.value[selectedPolylineIndex.value].positions;
+  const result = [];
+
+  let currentGroup = [];
+
+  for (const position of positions) {
+    if (position.type === 'teleport') {
+      if (currentGroup.length > 0) {
+        result.push(currentGroup);
+        currentGroup = [];
+      }
+      currentGroup.push(position);
+    } else {
+      currentGroup.push(position);
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    result.push(currentGroup);
+  }
+
+
+  polylines.value[0].positions=result[0];
+  updateMapFromPolyLine(polylines.value[0]);
+  selectPolyline(0);
+  for (let i = 1; i < result.length; i++) {
+    let pl=Object.assign({},polylines.value[0],{positions:result[i]});
+    delete pl.layer;
+    pl=JSON.parse(JSON.stringify(pl));
+    pl.name = pl.name+"_"+(i+1);
+    addSpliePolyline(pl);
+    updateMapFromPolyLine(polylines.value[i]);
+    selectPolyline(i);
+  }
+
+}
+function addSpliePolyline(importedData) {
+  const layer = L.polyline(importedData.positions.map((pos) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  }), {
+    color: 'red',
+    weight: 3,
+  }).addTo(map.value);
+  layer.on('pm:edit', handleMapPointChange);
+  importedData.layer=layer;
+  polylines.value.push(importedData);
+}
+const showEditPointModal=ref(false);
+const curUpdatePosition=ref({});
+const curUpdatrowIndex=ref({});
+
+const editPointModal=(record,rowIndex)=>{
+  newPointX.value=record.x;
+  newPointY.value=record.y;
+  curUpdatePosition.value=record;
+  curUpdatrowIndex.value=rowIndex;
+  showEditPointModal.value = true;
+  selectPoint(record,rowIndex);
+};
+const updatePointModal=()=>{
+  curUpdatePosition.value.x=newPointX.value;
+  curUpdatePosition.value.y=newPointY.value;
+  showEditPointModal.value = false;
+  updateMapFromTable(selectedPolylineIndex.value,curUpdatrowIndex.value);
+  selectPoint(curUpdatePosition.value,curUpdatrowIndex.value);
+};
+function formatNumber(num) {
+  // 保留两位小数，但去掉多余的 0
+  let str = num.toFixed(2);
+  if (str.endsWith('.00')) {
+    return str.slice(0, -3);
+  } else if (str.endsWith('0')) {
+    return str.slice(0, -1);
+  } else {
+    return str;
+  }
+}
 </script>
 
 <template>
@@ -710,6 +864,7 @@ const combatScriptColumns = [
                     style="width: 150px;"
                   />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
+                  <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">标签管理</a-button>
                   <a-button @click="deletePolyline(index)" status="danger" size="small">删除</a-button>
                   <a-button @click="exportPositions(index)" type="secondary" size="small">导出</a-button>
                 </a-space>
@@ -730,7 +885,13 @@ const combatScriptColumns = [
             <template #drag-handle-icon>
               <icon-drag-dot-vertical />
             </template>
-            <template #x="{ record, rowIndex }">
+            <template #id="{ record, rowIndex }" >
+              <span :style="{color:(record.point_ext_params?'blue':'')}">{{record.id}}</span>
+            </template>
+            <template #xy="{ record, rowIndex }" >
+              <a-button type="text" @click="editPointModal(record,rowIndex)">{{formatNumber(record.x)}}, {{formatNumber(record.y)}}</a-button>
+            </template>
+           <template #x="{ record, rowIndex }">
               <a-input-number
                 v-model="record.x"
                 @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
@@ -754,7 +915,7 @@ const combatScriptColumns = [
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-select v-model="record.action" @change="actionChange(record)">
+              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
                 <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
                   {{ option.label }}
                 </a-option>
@@ -786,6 +947,8 @@ const combatScriptColumns = [
                 <a-button style="margin-left: 10px"  status="success" >更多</a-button>
                 <template #content>
                   <a-doption :value="{ onclick: copyPosition,record,rowIndex}">复制</a-doption>
+                  <a-doption :value="{ onclick: editPointExtParams,record,rowIndex}" >{{(record.point_ext_params?"修改":"新增") + "扩展参数"}}</a-doption>
+                  <a-doption :value="{ onclick: deletePointExtParams,record,rowIndex}"  v-if="record.point_ext_params">清除扩展参数</a-doption>
                   <a-doption :value="{ onclick: lockRowIndex,record,rowIndex}" v-if="!record.locked">锁定行</a-doption>
                   <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}"  v-if="record.locked">解锁行</a-doption>
                 </template>
@@ -796,6 +959,13 @@ const combatScriptColumns = [
 
           <template #extra>
             <a-button @click="clearPoints" type="primary" size="small" >清空</a-button>
+            <a-popconfirm  content="是否确认合并！"  @ok="mergedPolyline" okText="确认" cancelText="关闭">
+              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并</a-button>
+            </a-popconfirm>
+            <a-popconfirm  content="是否确认按传送点进行拆分！"  @ok="splitPolyline" okText="确认" cancelText="关闭">
+              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length == 1  && polylines[selectedPolylineIndex].positions.filter(item=>item.type=='teleport').length>1">拆分</a-button>
+            </a-popconfirm>
+
             <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">战斗策略管理</a-button>
             <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位</a-button>
           </template>
@@ -804,7 +974,85 @@ const combatScriptColumns = [
     </a-layout-content>
   </a-layout>
   <!-- 战斗策略管理 -->
+  <!-- 添加战斗策略 -->
+  <a-modal
+      v-model:visible="showPointExtConfig"
+      title="扩展参数"
+      @ok="savePointExtParams"
+      @cancel="showPointExtConfig = false"
+      :width="800"
+  >
+    <a-form size="mini">
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="怪物标签：" size="mini"  tooltip="为此点位打上标签，后续可能根据怪物种类决定是否拾取设置等逻辑。">
+            <a-select v-model="pointExtParams.monster_tag" allow-clear> 
+              <a-option value="normal">小怪</a-option>
+              <a-option value="elite">精英</a-option>
+              <a-option value="legendary">传奇</a-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
 
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="异常识别：" size="mini" :content-flex="false" :merge-props="false" allow-clear  tooltip="当遇到点位无法识别时，用其他方式来解决无法识别的情况，编辑器如果无法识别点位，可以用编辑线的方式加点位。">
+
+            <a-space direction="vertical" fill>
+              <a-form-item field="misidentification.type" label="类型" tooltip="当小地图特征点比较少时，会出现点位无法识别或识别到其他位置的问题，
+              此选项决定在什么情况下处理。
+              未识别：算出坐标为0，即明面意思。
+              路径过远：识别到其他的坐标，从而算出路径过远。">
+                <a-select v-model="pointExtParams.misidentification.type" allow-clear multiple>
+                  <a-option value="unrecognized">未识别</a-option>
+                  <a-option value="pathTooFar">路径过远</a-option>
+                </a-select>
+              </a-form-item>
+              <a-row :gutter="8">
+                <a-col :span="12">
+                  <a-form-item field="misidentification.handling_mode" label="处理方式"  label-col-flex="100px" tooltip="
+取上一个识别到的点位置:即当未识别时，拿上一次能正确识别的点。
+大地图识别：即当未识别时，打开大地图，取中心点坐标，当中心点也识别不到时，取上一个识别到的点位。
+特定时间到达：自行估算到达时间，不会尝试获取从小地图获取坐标，适用于纯平地，最好时最后一个点位。
+">
+                    <a-select v-model="pointExtParams.misidentification.handling_mode" allow-clear>
+                      <a-option value="previousDetectedPoint">取上一个识别到的点位置</a-option>
+                      <a-option value="mapRecognition">大地图识别</a-option>
+<!--                      <a-option value="scheduledArrival">特定时间到达</a-option>-->
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item field="misidentification.arrival_time" >
+                    <a-input-number v-model="pointExtParams.misidentification.arrival_time" v-if="pointExtParams.misidentification.handling_mode === 'scheduledArrival'" placeholder="毫秒" class="input-demo" :min="0" allow-clear/>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-space>
+          </a-form-item>
+        </a-col>
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item field="description" label="描述：">
+            <a-textarea v-model="pointExtParams.description" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+
+
+
+      
+<!--      <a-form-item label="策略参数">
+        <a-input v-model="pointExtParams.enable"  allow-clear />
+      </a-form-item>
+      <a-form-item   label="是否默认">
+        <a-checkbox :value="true" v-model="pointExtParams.def"></a-checkbox>
+      </a-form-item>-->
+    </a-form>
+  </a-modal>
   <a-modal
       v-model:visible="showCombatScriptManagerModal"
       title="战斗策略管理"
@@ -856,7 +1104,20 @@ const combatScriptColumns = [
       </a-form-item>
     </a-form>
   </a-modal>
-
+  <!-- 标签管理 -->
+  <a-modal
+      v-model:visible="showCommonTagManager"
+      title="标签管理"
+      @ok="saveCommonTagManagerModal"
+      @cancel="showCommonTagManager = false"
+      width="50%" height="50%"
+      okText="保存"
+      cancelText="关闭"
+  >
+    <a-input-tag v-model="commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+  </a-modal>
+  
+  
   <!-- 添加点位的模态框 -->
   <a-modal
     v-model:visible="showAddPointModal"
@@ -873,7 +1134,21 @@ const combatScriptColumns = [
       </a-form-item>
     </a-form>
   </a-modal>
-
+  <a-modal
+      v-model:visible="showEditPointModal"
+      title="修改点位坐标"
+      @ok="updatePointModal"
+      @cancel="showEditPointModal = false"
+  >
+    <a-form :model="{ x: newPointX, y: newPointY }">
+      <a-form-item field="x" label="X坐标">
+        <a-input-number v-model="newPointX" placeholder="请输入X坐标" />
+      </a-form-item>
+      <a-form-item field="y" label="Y坐标">
+        <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
   <!-- 导出模态框 -->
   <a-modal
     v-model:visible="showExportModal"
@@ -897,9 +1172,10 @@ const combatScriptColumns = [
 
 <script>
 const columns = [
-  { title: '#', dataIndex: 'id' },
-  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
-  { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },
+  { title: '#', dataIndex: 'id' , slotName: 'id'},
+  { title: '坐标', dataIndex: 'xy', slotName: 'xy' },
+/*  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
+  { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },*/
   { title: '类型', dataIndex: 'type', slotName: 'type' },
   { title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode' },
   { title: '动作', dataIndex: 'action', slotName: 'action' },
