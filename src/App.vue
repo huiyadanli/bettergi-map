@@ -403,11 +403,20 @@ function selectPolyline(index) {
 }
 
 function deletePolyline(index) {
-  map.value.removeLayer(polylines.value[index].layer);
-  polylines.value.splice(index, 1);
-  if (selectedPolylineIndex.value >= polylines.value.length) {
-    selectedPolylineIndex.value = Math.max(0, polylines.value.length - 1);
-  }
+  Modal.confirm({
+    title: '确认删除',
+    content: '确定要删除该路线吗？此操作不可撤销。',
+    okText: '删除',
+    okButtonProps: { status: 'danger' },
+    cancelText: '取消',
+    onOk: () => {
+      map.value.removeLayer(polylines.value[index].layer);
+      polylines.value.splice(index, 1);
+      if (selectedPolylineIndex.value >= polylines.value.length) {
+        selectedPolylineIndex.value = Math.max(0, polylines.value.length - 1);
+      }
+    }
+  });
 }
 
 function updateMapFromTable(polylineIndex, positionIndex) {
@@ -428,15 +437,15 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
 // 添加动作选项
 const actionOptions = [
   { label: '无', value: '' },
+  { label: '战斗', value: 'fight' },
+  { label: '执行战斗策略', value: 'combat_script' },
+  { label: '纳西妲长E收集', value: 'nahida_collect' },
   { label: '下落攻击', value: 'stop_flying' },
   { label: '强制传送', value: 'force_tp' },
   { label: '四叶印', value: 'up_down_grab_leaf' },
   { label: '挖矿', value: 'mining' },
   { label: '钓鱼', value: 'fishing' },
-  { label: '战斗', value: 'fight' },
-  { label: '执行战斗策略', value: 'combat_script' },
   { label: '在附近拾取', value: 'pick_around' },
-  { label: '纳西妲长E收集', value: 'nahida_collect' },
   { label: '水元素力采集', value: 'hydro_collect' },
   { label: '雷元素力采集', value: 'electro_collect' },
   { label: '风元素力采集', value: 'anemo_collect' },
@@ -906,8 +915,8 @@ function formatNumber(num) {
             <template #move_mode="{ record }">
               <a-select v-model="record.move_mode">
                 <a-option value="walk">行走</a-option>
-                <a-option value="run">奔跑</a-option>
-                <a-option value="dash">多次冲刺</a-option>
+                <a-option value="dash">间歇冲刺</a-option>
+                <a-option value="run">持续奔跑</a-option>
                 <a-option value="fly">飞行</a-option>
                 <a-option value="swim">游泳</a-option>
                 <a-option value="climb">攀爬</a-option>
