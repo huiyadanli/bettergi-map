@@ -454,6 +454,38 @@ const actionOptions = [
   { label: '退至登录页面重新登录', value: 'exit_and_relogin' },
 ];
 
+
+const actionOptionsTree = [
+  { label: '无', value: '' },
+  { label: '战斗', value: 'fight' },
+  { label: '执行战斗策略', value: 'combat_script' },
+  { label: '纳西妲长E收集', value: 'nahida_collect' },
+  { label: '下落攻击', value: 'stop_flying' },
+  { label: '强制传送', value: 'force_tp' },
+  { label: '四叶印', value: 'up_down_grab_leaf' },
+  { label: '挖矿', value: 'mining' },
+  { label: '钓鱼', value: 'fishing' },
+  { label: '在附近拾取', value: 'pick_around' },
+  {
+    label: '元素力采集',
+    value: 'element',
+    children: [
+      { label: '水元素力采集', value: 'hydro_collect' },
+      { label: '雷元素力采集', value: 'electro_collect' },
+      { label: '风元素力采集', value: 'anemo_collect' },
+      { label: '火元素力采集', value: 'pyro_collect' },
+    ]
+  },
+  {
+    label: '其他',
+    value: 'system',
+    children: [
+      { label: '在遮罩窗口输出日志', value: 'log_output' },
+      { label: '退至登录页面重新登录', value: 'exit_and_relogin' },
+    ]
+  }
+];
+
 function handleChange(newData) {
   const polyline = polylines.value[selectedPolylineIndex.value];
 
@@ -637,6 +669,10 @@ const saveCombatScript=()=>{
 }
 //默认战斗策略赋值
 const actionChange = (record) => {
+  // 确保 action 字段值是最终叶子节点的值
+  if (Array.isArray(record.action)) {
+    record.action = record.action[record.action.length - 1];
+  }
   if (record.action === "combat_script"){
     record.action_params=(combatScriptData.value.find(item=>item.def) || {}).value;
   }else{
@@ -924,11 +960,19 @@ function formatNumber(num) {
               </a-select>
             </template>
             <template #action="{ record }">
-              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
+<!--              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
                 <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
                   {{ option.label }}
                 </a-option>
-              </a-select>
+              </a-select>-->
+              <a-cascader
+                  v-model="record.action"
+                  :options="actionOptionsTree"
+                  placeholder="请选择动作"
+                  @change="actionChange(record)"
+                  style="min-width: 120px"
+                  :field-names="{ label: 'label', value: 'value', children: 'children' }"
+              />
               <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params" :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志" strict />
               <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"  placeholder="录入下落攻击等待时间(毫秒)" strict />
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
