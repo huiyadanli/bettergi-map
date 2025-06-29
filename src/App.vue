@@ -63,11 +63,18 @@ const newPointName = ref('');
 const selectedPointIndex = ref(-1);
 const highlightMarker = ref(null);
 
-// 导出
-const exportAuthor = ref('');
-const exportVersion = ref('1.0');
-const exportDescription = ref('');
-const showExportModal = ref(false);
+// 添加保存路径相关的响应式变量
+const showSavePathModal = ref(false);
+
+// 添加导出路径相关的响应式变量
+const showExportPathModal = ref(false);
+const exportAvailableFiles = ref([]);
+const exportSelectedFile = ref('');
+const exportCurrentDirectory = ref('');
+const exportDirectoryHistory = ref(['']);
+const exportFileName = ref('');
+
+const isExportFlow = ref(false);
 
 //本地存储
 const saveLocal = (k,v) => {
@@ -78,6 +85,79 @@ const loadLocal = (k) => {
   if(!val) return val;
   return JSON.parse(val) ;
 }
+
+// 添加API基础URL
+const API_BASE = 'http://localhost:5174/api/pathing';
+
+// 从后端API读取文件
+async function readFileFromAPI(filePath) {
+  try {
+    const response = await fetch(`${API_BASE}/read/${filePath}`);
+    const result = await response.json();
+    if (result.success) {
+      return result.data;
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error('从API读取文件失败:', error);
+    throw error;
+  }
+}
+
+// 保存文件到后端
+async function saveFileToAPI(data, filePath) {
+  try {
+    const response = await fetch(`${API_BASE}/save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data, filePath })
+    });
+    const result = await response.json();
+    if (result.success) {
+      return result;
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error('保存文件到API失败:', error);
+    throw error;
+  }
+}
+
+// 检查文件是否存在
+async function checkFileExists(filePath) {
+  try {
+    const response = await fetch(`${API_BASE}/read/${filePath}`);
+    const result = await response.json();
+    return result.success; // 如果文件存在，返回true；如果不存在，返回false
+  } catch (error) {
+    return false; // 如果请求失败，认为文件不存在
+  }
+}
+
+// 获取文件列表
+async function getFileListFromAPI(directory) {
+  try {
+    const response = await fetch(`${API_BASE}/files/${directory}`);
+    const result = await response.json();
+    if (result.success) {
+      return result.data;
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error('获取文件列表失败:', error);
+    throw error;
+  }
+}
+
+// 全局默认配置
+const defaultConfig = {
+  bgi_version: import.meta.env.VITE_BGI_VERSION || '0.46.2',
+};
 
 onMounted(() => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -100,6 +180,9 @@ onMounted(() => {
   window.history.replaceState(null, '', newUrl);
 
   loadMapImageAndInit(mapImage.value);
+  
+  // 初始化文件列表
+  loadFileList();
 });
 
 function loadMapImageAndInit(mapImageSrc) {
@@ -229,9 +312,8 @@ function handleMapPointChange(e) {
 }
 
 // 保持原有的 addPolyline 函数不变
-function addPolyline(layer, name = "未命名路径") {
+function addPolyline(layer) {
   const newPolyline = {
-    name: name,
     layer: layer,
     positions: layer.getLatLngs().map((latlng, index) => {
       const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
@@ -246,7 +328,6 @@ function addPolyline(layer, name = "未命名路径") {
       };
     }),
     info: { // 初始化 info 属性
-      name: name,
       author: '',
       version: '1.0',
       description: ''
@@ -258,11 +339,16 @@ function addPolyline(layer, name = "未命名路径") {
 }
 
 // 处理导入的数据
-async function addImportedPolyline(importedData) {
+async function addImportedPolyline(importedData, fileName) {
   const mapName = importedData.info.map_name || 'Teyvat'; // 默认地图为 Teyvat
   if (mapName !== currentMapName.value && mapConfigs[mapName]) {
     await switchMap(mapName); // 仅在地图不一致时切换
   }
+  const newOriginalFileName = getFileNameOnly(fileName) || importedData.info.originalFileName || '';
+  const existIndex = polylines.value.findIndex(
+    p => p.info && p.info.originalFileName === newOriginalFileName
+  );
+
   const positions = importedData.positions.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
@@ -274,7 +360,6 @@ async function addImportedPolyline(importedData) {
   layer.on('pm:edit', handleMapPointChange);
 
   const newPolyline = {
-    name: importedData.info.name,
     tags: importedData.info.tags || [],
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
@@ -287,36 +372,134 @@ async function addImportedPolyline(importedData) {
       type: pos.type || 'path',
       point_ext_params: pos.point_ext_params || undefined
     })),
-    info: importedData.info,
+    info: {
+      ...importedData.info,
+      originalFileName: newOriginalFileName,
+      originalFilePath: fileName || importedData.info.originalFilePath || ''
+    },
   };
-  polylines.value.push(newPolyline);
-  selectedPolylineIndex.value = polylines.value.length - 1;
+
+  if (existIndex !== -1) {
+    // 移除原有图层和 polyline
+    map.value.removeLayer(polylines.value[existIndex].layer);
+    polylines.value.splice(existIndex, 1, newPolyline);
+    selectedPolylineIndex.value = existIndex;
+  } else {
+    polylines.value.push(newPolyline);
+    selectedPolylineIndex.value = polylines.value.length - 1;
+  }
   selectPolyline(selectedPolylineIndex.value);
 }
 
-// 修改 importPositions 函数
-function importPositions() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.multiple = true;
-  input.onchange = (event) => {
-    [...event.target.files].forEach(file=>{
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = JSON.parse(e.target.result);
-        addImportedPolyline(data);
-      };
-      reader.readAsText(file);
-    })
+// 添加文件选择器相关的响应式变量
+const showFileSelectorModal = ref(false);
+const availableFiles = ref([]);
+const selectedFile = ref('');
+const currentDirectory = ref('');
+const directoryHistory = ref(['']);
+const importFileName = ref('未命名路径.json');
+const importFileNameError = ref('');
 
-  };
-  input.click();
+// 加载文件列表
+async function loadFileList(directory = '') {
+  try {
+    const files = await getFileListFromAPI(directory);
+    availableFiles.value = files;
+    currentDirectory.value = directory;
+  } catch (error) {
+    Message.error('加载文件列表失败: ' + error.message);
+  }
+}
+
+// 选择文件并导入
+async function selectAndImportFile() {
+  if (importFileName.value.includes('/')) {
+    importFileNameError.value = '文件名不能包含 / ，请只输入文件名，不要带路径';
+    return;
+  }
+  if (!selectedFile.value && !importFileName.value) {
+    Message.warning('请选择一个文件或输入文件名');
+    return;
+  }
+  try {
+    const filePath = selectedFile.value || importFileName.value;
+    const data = await readFileFromAPI(filePath);
+    addImportedPolyline(data, filePath); // 传递完整的文件路径
+    showFileSelectorModal.value = false;
+    selectedFile.value = '';
+    importFileName.value = '未命名路径.json';
+    importFileNameError.value = '';
+    Message.success('文件导入成功');
+  } catch (error) {
+    Message.error('导入文件失败: ' + error.message);
+  }
+}
+
+// 进入子目录
+function enterDirectory(directory) {
+  const newPath = currentDirectory.value + '/' + directory;
+  directoryHistory.value.push(newPath);
+  loadFileList(newPath);
+}
+
+// 返回上级目录
+function goBackDirectory() {
+  if (directoryHistory.value.length > 1) {
+    directoryHistory.value.pop();
+    const parentDir = directoryHistory.value[directoryHistory.value.length - 1];
+    loadFileList(parentDir);
+  }
+}
+
+// 强制刷新当前选中polyline的方法
+function refreshSelectedPolyline(index = selectedPolylineIndex.value) {
+  // 强制触发Vue响应式更新
+  polylines.value = [...polylines.value];
+  // 重新选择polyline以确保所有相关数据都更新
+  selectPolyline(index);
+  // 强制触发computed属性重新计算
+  selectedPolylineIndex.value = selectedPolylineIndex.value;
+  
+  // 如果标签管理模态框是打开的，同步更新标签管理相关的变量
+  if (showCommonTagManager.value && polylineTagsSelectIndex.value === index) {
+    const info = polylines.value[index].info || {};
+    commonTagAuthor.value = info.author || '';
+    commonTagVersion.value = info.version || '';
+    commonTagDescription.value = info.description || '';
+    commonTagBgiVersion.value = info.bgi_version || defaultConfig.bgi_version;
+    commonTag.value = [...(info.tags || [])];
+  }
+}
+
+// 修改导出函数，支持保存到后端
+async function exportToBackend(index, filePath) {
+  try {
+    const polyline = polylines.value[index];
+    const data = {
+      info: {
+        type: "collect",
+        author: polyline.info.author,
+        version: polyline.info.version,
+        description: polyline.info.description,
+        map_name: currentMapName.value,
+        bgi_version: defaultConfig.bgi_version,
+        tags: polyline.info.tags || [],
+        last_modified_time: Date.now()
+      },
+      positions: polyline.positions
+    };
+    const result = await saveFileToAPI(data, filePath);
+    refreshSelectedPolyline(index);
+    return result;
+  } catch (error) {
+    Message.error('保存文件失败: ' + error.message);
+    throw error;
+  }
 }
 
 // 添加重命名函数
 function renamePolyline(index, newName) {
-  polylines.value[index].name = newName;
+  polylines.value[index].info.originalFileName = newName;
 }
 
 function updatePolyline(layer) {
@@ -350,50 +533,104 @@ function updatePolyline(layer) {
 }
 let preAuthor=(loadLocal("_preAuthor") || {}).preAuthor;
 function exportPositions(index) {
+  isExportFlow.value = true;
   const polyline = polylines.value[index];
-  // 检查 polyline.info 是否存在
-  const info = polyline.info || {};
-  exportAuthor.value = info.author|| preAuthor || '' ; // 回填作者信息
-  exportVersion.value = info.version || ''; // 回填版本信息
-  showExportModal.value = true;
-  selectedPolylineIndex.value = index;
+  if (polyline.info && polyline.info.originalFileName) {
+    exportFileName.value = getFileNameOnly(polyline.info.originalFileName);
+  } else {
+    exportFileName.value = '未命名路径.json';
+  }
+  commonTagManagerModal(index);
 }
 
-function handleExport() {
+async function handleExportToBackend() {
   const polyline = polylines.value[selectedPolylineIndex.value];
   const data = {
     info: {
-      name: polyline.name,
       type: "collect",
-      author: exportAuthor.value, // 使用用户输入的作者信息
-      version: exportVersion.value, // 使用用户输入的版本信息
-      description: exportDescription.value, // 添加描述信息
-      map_name: currentMapName.value, // 添加地图名字
-      bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
-      ,tags:polyline.tags || []
-      ,last_modified_time:Date.now() //导出时间
-      
+      author: polyline.info.author,
+      version: polyline.info.version,
+      description: polyline.info.description,
+      map_name: currentMapName.value,
+      bgi_version: defaultConfig.bgi_version,
+      tags: polyline.info.tags || [],
+      last_modified_time: Date.now()
     },
-    positions: polyline.positions // 已经是游戏坐标，无需转换
+    positions: polyline.positions
   };
-  if (!(polyline.info && polyline.info.author)){
-    preAuthor = exportAuthor.value;
-    saveLocal("_preAuthor",{preAuthor})
+  // 目标路径
+  let filePath = exportCurrentDirectory.value + '/' + exportFileName.value;
+  // 去除多余斜杠
+  filePath = filePath.replace(/\/+/g, '/').replace(/\/$/, '');
+  
+  // 检查是否存在同名文件
+  const existingFile = exportAvailableFiles.value.find(file => 
+    !file.isDirectory && file.name === exportFileName.value
+  );
+  
+  if (existingFile) {
+    // 如果存在同名文件，弹出确认对话框
+    Modal.confirm({
+      title: '文件已存在',
+      content: `文件 "${exportFileName.value}" 已存在，是否覆盖？`,
+      okText: '覆盖',
+      okButtonProps: { status: 'danger' },
+      cancelText: '取消',
+      onOk: async () => {
+        await performExport(data, filePath);
+      },
+      onCancel: () => {
+        // 用户取消操作
+      }
+    });
+  } else {
+    // 直接导出
+    await performExport(data, filePath);
   }
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${polyline.name}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  showExportModal.value = false;
+}
+
+
+async function performExport(data, filePath) {
+  try {
+    const response = await fetch(`${API_BASE}/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data, filePath })
+    });
+    const result = await response.json();
+    if (result.success) {
+      // 同步 polyline 的 info 字段
+      const polyline = polylines.value[selectedPolylineIndex.value];
+      if (polyline && polyline.info) {
+        polyline.info.originalFileName = getFileNameOnly(filePath);
+        polyline.info.originalFilePath = filePath;
+      }
+      refreshSelectedPolyline();
+      Message.success('文件已导出到本地');
+      showExportPathModal.value = false;
+      // 刷新文件列表
+      loadExportFileList('');
+    } else {
+      Message.error('导出失败: ' + (result.error || '未知错误'));
+    }
+  } catch (error) {
+    Message.error('导出失败: ' + error.message);
+  }
 }
 
 const selectedPolyline = computed(() => {
   const polyline = polylines.value[selectedPolylineIndex.value];
-  return polyline ? { ...polyline, positions: [...polyline.positions] } : { positions: [] };
+  if (!polyline) {
+    return { 
+      positions: [],
+      tags: [],
+      info: {}
+    };
+  }
+  return { 
+    ...polyline, 
+    positions: polyline.positions
+  };
 });
 
 function selectPolyline(index) {
@@ -402,19 +639,17 @@ function selectPolyline(index) {
   map.value.setZoom(2);
 }
 
-function deletePolyline(index) {
+function deletePosition(index) {
+  const polyline = polylines.value[selectedPolylineIndex.value];
   Modal.confirm({
     title: '确认删除',
-    content: '确定要删除该路线吗？此操作不可撤销。',
+    content: '确定要删除该点位吗？此操作不可撤销。',
     okText: '删除',
     okButtonProps: { status: 'danger' },
     cancelText: '取消',
     onOk: () => {
-      map.value.removeLayer(polylines.value[index].layer);
-      polylines.value.splice(index, 1);
-      if (selectedPolylineIndex.value >= polylines.value.length) {
-        selectedPolylineIndex.value = Math.max(0, polylines.value.length - 1);
-      }
+      polyline.positions.splice(index, 1);
+      updateMapFromPolyLine(polyline);
     }
   });
 }
@@ -528,13 +763,6 @@ const setPositionRowClass=(record,rowIndex)=>{
   }
   return "";
 }
-// 添加删除点位的函数
-function deletePosition(index) {
-  const polyline = polylines.value[selectedPolylineIndex.value];
-  polyline.positions.splice(index, 1);
-  updateMapFromPolyLine(polyline);
-
-}
 // 更新地图上的折线
 const updateMapFromPolyLine=(polyline)=>{
   //更新序号
@@ -553,6 +781,32 @@ function openAddPointModal() {
   newPointY.value = 0;
   newPointName.value = '';
 }
+function clearPolyline(index) {
+  Modal.confirm({
+    title: '确认清空路径',
+    content: '确定要清空该路径吗？此操作不可撤销。',
+    okText: '清空',
+    okButtonProps: { status: 'danger' },
+    cancelText: '取消',
+    onOk: () => {
+      const polyline = polylines.value[index];
+      // 清空点位
+      polyline.positions = [];
+      // 清空标签
+      polyline.tags = [];
+      // 清空文件路径相关
+      if (polyline.info) {
+        polyline.info.originalFileName = '';
+        polyline.info.originalFilePath = '';
+      }
+      // 更新地图上的折线
+      if (polyline.layer) {
+        polyline.layer.setLatLngs([]);
+      }
+    }
+  });
+}
+
 function clearPoints(){
   Modal.confirm({
     title: '请确认',
@@ -560,16 +814,21 @@ function clearPoints(){
     okText: '确认',
     cancelText: '取消',
     onOk: () => {
-      if (polylines.value[selectedPolylineIndex.value]){
-        polylines.value[selectedPolylineIndex.value].positions=[];
+      const polyline = polylines.value[selectedPolylineIndex.value];
+      if (polyline) {
+        polyline.positions = [];
+        // 同时更新地图上的折线
+        if (polyline.layer) {
+          polyline.layer.setLatLngs([]);
+        }
       }
     },
     onCancel: () => {
 
     },
   });
-
 }
+
 function addNewPoint(x, y) {
   const main1024Pos = coordinateConverter.value.gameToMain1024(x, y);
   const newPoint = {
@@ -590,7 +849,7 @@ function addNewPoint(x, y) {
     }).addTo(map.value);
     map.value.setZoom(2);
     layer.on("pm:edit", handleMapPointChange);
-    addPolyline(layer, "未命名路径");  // 使用默认名称 "未命名路径"
+    addPolyline(layer);  // 使用默认名称 "未命名路径"
   } else {
     // 添加新点位到现有路径
     const polyline = polylines.value[selectedPolylineIndex.value];
@@ -608,9 +867,6 @@ function addNewPoint(x, y) {
 
     // 更新地图上的折线
     updateMapFromPolyLine(polyline)
-/*    const latlngs = polyline.layer.getLatLngs();
-    latlngs.push(L.latLng(main1024Pos.y, main1024Pos.x));
-    polyline.layer.setLatLngs(latlngs);*/
   }
 }
 
@@ -684,7 +940,7 @@ const actionChange = (record) => {
 }
 const newActionParams=ref({value:"",def:false});
 const addCombatScript=()=>{
- const newActionParamsTemp=Object.assign({},newActionParams.value);
+ const newActionParamsTemp = { ...newActionParams.value };
   if (combatScriptData.value.find(item=>item.value === newActionParamsTemp.value )){
     alert("不要重复添加！");
   }else{
@@ -695,8 +951,7 @@ const addCombatScript=()=>{
          item.def = false;
        })
      }
-    newActionParams.value={value:"",def:false};
-    combatScriptData.value=[...temp,newActionParamsTemp];
+    combatScriptData.value.push(newActionParamsTemp);
     saveLocal(combatScriptKey,combatScriptData.value);
 
   }
@@ -744,13 +999,13 @@ const pointExtParams=ref(Object.assign({},defaultPointExtParams));
 const showPointExtConfig=ref(false);
 let curPointRecord;
 const  editPointExtParams = (record,rowIndex)=>{
-  pointExtParams.value = record.point_ext_params || Object.assign({},JSON.parse(JSON.stringify(defaultPointExtParams)));
+  pointExtParams.value = record.point_ext_params || JSON.parse(JSON.stringify(defaultPointExtParams));
   showPointExtConfig.value = true;
   curPointRecord=record;
 }
 const  savePointExtParams = ()=>{
  if (curPointRecord){
-   curPointRecord.point_ext_params= JSON.parse(JSON.stringify(pointExtParams.value));
+   curPointRecord.point_ext_params = { ...pointExtParams.value };
  }
 
 }
@@ -760,18 +1015,46 @@ const  deletePointExtParams = (record,rowIndex)=>{
 
 
 //标签管理
-const commonTagKey="_commonTag";
 const commonTag = ref([]);
+const commonTagAuthor = ref('');
+const commonTagVersion = ref('');
+const commonTagDescription = ref('');
+const commonTagBgiVersion = ref(defaultConfig.bgi_version);
 const showCommonTagManager = ref(false);
 const polylineTagsSelectIndex=ref(-1);
 const commonTagManagerModal = (index)=>{
-  commonTag.value = polylines.value[index].tags || [];
+  const info = polylines.value[index].info || {};
+  commonTagAuthor.value = info.author || '';
+  commonTagVersion.value = info.version || '';
+  commonTagDescription.value = info.description || '';
+  commonTagBgiVersion.value = info.bgi_version || defaultConfig.bgi_version;
   polylineTagsSelectIndex.value=index;
   showCommonTagManager.value = true;
 }
-const saveCommonTagManagerModal = ()=>{
-  polylines.value[polylineTagsSelectIndex.value].tags=commonTag.value;
-}
+const saveCommonTagManagerModal = async () => {
+  const info = polylines.value[polylineTagsSelectIndex.value].info;
+  info.author = commonTagAuthor.value;
+  info.version = commonTagVersion.value;
+  info.description = commonTagDescription.value;
+  info.bgi_version = commonTagBgiVersion.value;
+  // 同步标签
+  info.tags = [...commonTag.value];
+  polylines.value[polylineTagsSelectIndex.value].tags = [...commonTag.value];
+  showCommonTagManager.value = false;
+
+  if (isExportFlow.value) {
+    const polyline = polylines.value[polylineTagsSelectIndex.value];
+    if (polyline && polyline.info && polyline.info.originalFileName) {
+      exportFileName.value = getFileNameOnly(polyline.info.originalFileName);
+    } else {
+      exportFileName.value = '未命名路径.json';
+    }
+    exportSelectedFile.value = '';
+    await enterDefaultDirectory('export');
+    showExportPathModal.value = true;
+    isExportFlow.value = false; // 重置
+  }
+};
 const commonTagChange = () => {
   let tags=commonTag.value;
   const newTags=[];
@@ -831,7 +1114,7 @@ const splitPolyline=()=>{
   for (let i = 1; i < result.length; i++) {
     let pl=Object.assign({},polylines.value[0],{positions:result[i]});
     delete pl.layer;
-    pl=JSON.parse(JSON.stringify(pl));
+    pl = { ...pl };
     pl.name = pl.name+"_"+(i+1);
     addSpliePolyline(pl);
     updateMapFromPolyLine(polylines.value[i]);
@@ -881,6 +1164,124 @@ function formatNumber(num) {
     return str;
   }
 }
+
+// 保存到后端模态框
+async function saveToBackendModal(index) {
+  try {
+    const polyline = polylines.value[index];
+    let originalPath;
+    
+    if (polyline.info && polyline.info.originalFilePath) {
+      // 如果有完整的原始路径，直接使用
+      originalPath = polyline.info.originalFilePath;
+    } else if (polyline.info && polyline.info.originalFileName) {
+      // 如果只有文件名，构建默认路径
+      originalPath = `repo/pathing/${polyline.info.originalFileName}`;
+    } else {
+      // 如果都没有，使用默认路径
+      originalPath = `repo/pathing/${polyline.name}.json`;
+    }
+    
+    // 检查文件是否存在
+    const fileExists = await checkFileExists(originalPath);
+    
+    if (fileExists) {
+      // 如果文件存在，弹出确认对话框
+      Modal.confirm({
+        title: '文件已存在',
+        content: `文件 "${getFileNameOnly(originalPath)}" 已存在，是否覆盖？`,
+        okText: '覆盖',
+        okButtonProps: { status: 'danger' },
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await exportToBackend(index, originalPath);
+            Message.success('文件保存成功');
+          } catch (error) {
+            // 错误已经在exportToBackend中处理了
+          }
+        }
+      });
+    } else {
+      // 如果文件不存在，直接保存
+      await exportToBackend(index, originalPath);
+      Message.success('文件保存成功');
+    }
+  } catch (error) {
+    // 错误已经在exportToBackend中处理了
+  }
+}
+
+// 加载导出文件列表（目录浏览）
+async function loadExportFileList(directory = '') {
+  try {
+    const files = await getFileListFromAPI(directory);
+    exportAvailableFiles.value = files;
+    exportCurrentDirectory.value = directory;
+  } catch (error) {
+    Message.error('加载文件列表失败: ' + error.message);
+  }
+}
+
+// 进入导出子目录
+function enterExportDirectory(directory) {
+  const newPath = exportCurrentDirectory.value + '/' + directory;
+  exportDirectoryHistory.value.push(newPath);
+  loadExportFileList(newPath);
+}
+// 返回导出上级目录
+function goBackExportDirectory() {
+  if (exportDirectoryHistory.value.length > 1) {
+    exportDirectoryHistory.value.pop();
+    const parentDir = exportDirectoryHistory.value[exportDirectoryHistory.value.length - 1];
+    loadExportFileList(parentDir);
+  }
+}
+
+function handleImportFileClick(item) {
+  if (!item.isDirectory && item.name.endsWith('.json')) {
+    importFileName.value = item.name;
+  }
+}
+
+async function enterDefaultDirectory(type = 'import') {
+  const rootFiles = await getFileListFromAPI('');
+  let defaultDir = '';
+  if (rootFiles.some(f => f.isDirectory && f.name === 'repo')) {
+    defaultDir = 'repo';
+  } else if (rootFiles.some(f => f.isDirectory && f.name === 'Users')) {
+    defaultDir = 'Users';
+  }
+  if (type === 'import') {
+    currentDirectory.value = defaultDir;
+    directoryHistory.value = [defaultDir];
+    loadFileList(defaultDir);
+  } else {
+    exportCurrentDirectory.value = defaultDir;
+    exportDirectoryHistory.value = [defaultDir];
+    loadExportFileList(defaultDir);
+  }
+}
+
+async function importPositions() {
+  importFileName.value = '未命名路径.json';
+  showFileSelectorModal.value = true;
+  await enterDefaultDirectory('import');
+}
+
+// 新增同步方法
+function syncExportFileNameToPolyline() {
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  if (polyline && polyline.info) {
+    polyline.info.originalFileName = getFileNameOnly(exportFileName.value);
+  }
+}
+
+// 新增工具函数
+function getFileNameOnly(path) {
+  if (!path) return '';
+  return path.split(/[/\\\\]/).pop();
+}
 </script>
 
 <template>
@@ -906,21 +1307,16 @@ function formatNumber(num) {
             <template #item="{ item, index }">
               <a-list-item>
                 <a-space>
-                  <a-input
-                    v-model="item.name"
-                    @change="(value) => renamePolyline(index, value)"
-                    style="width: 150px;"
-                  />
-                  <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
                   <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">标签管理</a-button>
-                  <a-button @click="deletePolyline(index)" status="danger" size="small">删除</a-button>
-                  <a-button @click="exportPositions(index)" type="secondary" size="small">导出</a-button>
+                  <a-button @click="clearPolyline(index)" status="danger" size="small">清空路径</a-button>
+                  <a-button @click="exportPositions(index)" type="secondary" size="small">导出到本地</a-button>
+                  <a-button @click="saveToBackendModal(index)" type="primary" size="small">保存</a-button>
                 </a-space>
               </a-list-item>
             </template>
           </a-list>
         </a-card>
-        <a-card :title="`点位信息 - ${selectedPolyline.name || '未选择路径'}`">
+        <a-card :title="`当前路径文件 - ${selectedPolyline.info.originalFileName || '未选择路径'}`">
           <a-table
             :columns="columns"
             :data="selectedPolyline.positions"
@@ -1020,7 +1416,7 @@ function formatNumber(num) {
               <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并</a-button>
             </a-popconfirm>
             <a-popconfirm  content="是否确认按传送点进行拆分！"  @ok="splitPolyline" okText="确认" cancelText="关闭">
-              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length == 1  && polylines[selectedPolylineIndex].positions.filter(item=>item.type=='teleport').length>1">拆分</a-button>
+              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length == 1  && selectedPolyline.positions.filter(item=>item.type=='teleport').length>1">拆分</a-button>
             </a-popconfirm>
 
             <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">战斗策略管理</a-button>
@@ -1171,7 +1567,24 @@ function formatNumber(num) {
       okText="保存"
       cancelText="关闭"
   >
-    <a-input-tag v-model="commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+    <a-form label-col="{ span: 4 }" wrapper-col="{ span: 20 }">
+      <a-form-item label="作者">
+        <a-input v-model="commonTagAuthor" placeholder="请输入作者" />
+      </a-form-item>
+      <a-form-item label="版本">
+        <a-input v-model="commonTagVersion" placeholder="请输入版本" />
+      </a-form-item>
+      <a-form-item label="描述">
+        <a-textarea
+          v-model="commonTagDescription"
+          placeholder="请输入描述"
+          :auto-size="{ minRows: 3, maxRows: 5 }"
+        />
+      </a-form-item>
+      <a-form-item label="bgi版本">
+        <a-input v-model="commonTagBgiVersion" placeholder="请输入bgi版本" />
+      </a-form-item>
+    </a-form>
   </a-modal>
   
   
@@ -1208,22 +1621,131 @@ function formatNumber(num) {
   </a-modal>
   <!-- 导出模态框 -->
   <a-modal
-    v-model:visible="showExportModal"
-    title="导出路径"
-    @ok="handleExport"
-    @cancel="showExportModal = false"
+    v-model:visible="showExportPathModal"
+    title="选择导出路径"
+    :footer="false"
+    @cancel="showExportPathModal = false"
+    width="60%"
   >
-    <a-form :model="{ author: exportAuthor, version: exportVersion }">
-      <a-form-item field="author" label="作者">
-        <a-input v-model="exportAuthor" placeholder="请输入作者" />
-      </a-form-item>
-      <a-form-item field="version" label="版本">
-        <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始" />
-      </a-form-item>
-      <a-form-item field="description" label="描述">
-        <a-textarea v-model="exportDescription" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
-      </a-form-item>
-    </a-form>
+    <a-space direction="vertical" size="large" fill>
+      <!-- 目录导航 -->
+      <a-card title="目录导航">
+        <a-space>
+          <a-button @click="goBackExportDirectory" :disabled="exportDirectoryHistory.length <= 1">
+            返回上级
+          </a-button>
+          <span>当前路径: {{ exportCurrentDirectory }}</span>
+        </a-space>
+      </a-card>
+      <!-- 新增路径输入和确认导入区域 -->
+      <a-card style="margin-bottom: 12px;">
+        <a-row align="middle" :gutter="8">
+          <a-col flex="none">
+            <span style="white-space: nowrap;">文件名：</span>
+          </a-col>
+          <a-col flex="auto">
+            <a-input
+              v-model="exportFileName"
+              @change="syncExportFileNameToPolyline"
+              placeholder="如 未命名路径.json"
+              style="width: 100%;"
+              @input="importFileNameError = exportFileName.includes('/') ? '文件名不能包含 / ，请只输入文件名，不要带路径' : ''"
+            />
+          </a-col>
+          <a-col flex="none">
+            <a-button type="primary" @click="handleExportToBackend">确认导出</a-button>
+          </a-col>
+        </a-row>
+      </a-card>
+      <div v-if="importFileNameError" style="color: red; font-size: 12px; margin-top: 2px;">{{ importFileNameError }}</div>
+      <!-- 文件列表和确认按钮在同一个卡片 -->
+      <a-card title="文件列表">
+        <a-list :data="exportAvailableFiles" :bordered="false">
+          <template #item="{ item }">
+            <a-list-item>
+              <a-space>
+                <a-button 
+                  v-if="item.isDirectory" 
+                  @click="enterExportDirectory(item.name)"
+                  type="text"
+                >
+                  📁 {{ item.name }}
+                </a-button>
+                <span v-else>📄 {{ item.name }}</span>
+              </a-space>
+            </a-list-item>
+          </template>
+        </a-list>
+      </a-card>
+    </a-space>
+  </a-modal>
+
+  <!-- 文件选择器模态框 -->
+  <a-modal
+    v-model:visible="showFileSelectorModal"
+    title="选择要导入的文件"
+    :footer="false"
+    @cancel="showFileSelectorModal = false"
+    width="60%"
+  >
+    <a-space direction="vertical" size="large" fill>
+      <!-- 目录导航 -->
+      <a-card title="目录导航">
+        <a-space>
+          <a-button @click="goBackDirectory" :disabled="directoryHistory.length <= 1">
+            返回上级
+          </a-button>
+          <span>当前路径: {{ currentDirectory }}</span>
+        </a-space>
+      </a-card>
+      <!-- 新增路径输入和确认导入区域 -->
+      <a-card style="margin-bottom: 12px;">
+        <a-row align="middle" :gutter="8">
+          <a-col flex="none">
+            <span style="white-space: nowrap;">文件名：</span>
+          </a-col>
+          <a-col flex="auto">
+            <a-input
+              v-model="importFileName"
+              @change="syncExportFileNameToPolyline"
+              placeholder="如 未命名路径.json"
+              style="width: 100%;"
+              @input="importFileNameError = importFileName.includes('/') ? '文件名不能包含 / ，请只输入文件名，不要带路径' : ''"
+            />
+          </a-col>
+          <a-col flex="none">
+            <a-button type="primary" @click="selectAndImportFile">确认导入</a-button>
+          </a-col>
+        </a-row>
+      </a-card>
+      <div v-if="importFileNameError" style="color: red; font-size: 12px; margin-top: 2px;">{{ importFileNameError }}</div>
+      <!-- 文件列表和确认按钮在同一个卡片 -->
+      <a-card title="文件列表">
+        <a-list :data="availableFiles" :bordered="false">
+          <template #item="{ item }">
+            <a-list-item>
+              <a-space>
+                <a-button 
+                  v-if="item.isDirectory" 
+                  @click="enterDirectory(item.name)"
+                  type="text"
+                >
+                  📁 {{ item.name }}
+                </a-button>
+                <a-radio 
+                  v-else 
+                  :value="item.path" 
+                  v-model="selectedFile"
+                  @click="handleImportFileClick(item)"
+                >
+                  📄 {{ item.name }}
+                </a-radio>
+              </a-space>
+            </a-list-item>
+          </template>
+        </a-list>
+      </a-card>
+    </a-space>
   </a-modal>
 </template>
 
