@@ -1,10 +1,10 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue';
+import {onMounted, ref, computed} from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
-import { CoordinateConverter } from './utils/coordinateConverter';
+import {CoordinateConverter} from './utils/coordinateConverter';
 import {Message, Modal} from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
@@ -64,6 +64,13 @@ const newPointName = ref('');
 const selectedPointIndex = ref(-1);
 const highlightMarker = ref(null);
 
+// 文件访问相关变量
+const currentPath = ref('');
+const pathHistory = ref([]);
+const availableFiles = ref([]);
+const selectedFiles = ref([]);
+const showFileSelectModal = ref(false);
+
 // 导出
 const exportAuthor = ref('');
 const exportVersion = ref('1.0');
@@ -71,13 +78,13 @@ const exportDescription = ref('');
 const showExportModal = ref(false);
 
 //本地存储
-const saveLocal = (k,v) => {
-  localStorage.setItem("bgiMap"+k, JSON.stringify(v));
+const saveLocal = (k, v) => {
+  localStorage.setItem("bgiMap" + k, JSON.stringify(v));
 }
 const loadLocal = (k) => {
-  const  val=localStorage.getItem("bgiMap"+k);
-  if(!val) return val;
-  return JSON.parse(val) ;
+  const val = localStorage.getItem("bgiMap" + k);
+  if (!val) return val;
+  return JSON.parse(val);
 }
 
 onMounted(() => {
@@ -95,7 +102,7 @@ onMounted(() => {
   urlParams.delete('map');
   let p = urlParams.toString();
   let newUrl = `${window.location.pathname}?${p}`;
-  if (p.length === 0){
+  if (p.length === 0) {
     newUrl = `${window.location.pathname}`;
   }
   window.history.replaceState(null, '', newUrl);
@@ -246,7 +253,7 @@ function addPolyline(layer, name = "未命名路径") {
         type: index === 0 ? "teleport" : "path",
         x: gamePos.x,
         y: gamePos.y,
-        action_params:""
+        action_params: ""
       };
     }),
     info: { // 初始化 info 属性
@@ -261,8 +268,7 @@ function addPolyline(layer, name = "未命名路径") {
   selectPolyline(selectedPolylineIndex.value);
 }
 
-// 处理导入的数据
-async function addImportedPolyline(importedData) {
+async function addImportedPolyline(importedData, filePath = null) {
   const mapName = importedData.info.map_name || 'Teyvat'; // 默认地图为 Teyvat
   if (mapName !== currentMapName.value && mapConfigs[mapName]) {
     await switchMap(mapName); // 仅在地图不一致时切换
@@ -280,7 +286,7 @@ async function addImportedPolyline(importedData) {
   const newPolyline = {
     name: importedData.info.name,
     tags: importedData.info.tags || [],
-    enable_monster_loot_split:!!importedData.info.enable_monster_loot_split,
+    enable_monster_loot_split: !!importedData.info.enable_monster_loot_split,
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -293,30 +299,220 @@ async function addImportedPolyline(importedData) {
       point_ext_params: pos.point_ext_params || undefined
     })),
     info: importedData.info,
+    savedPath: filePath // 记录原始文件路径
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
   selectPolyline(selectedPolylineIndex.value);
 }
 
-// 修改 importPositions 函数
-function importPositions() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.multiple = true;
-  input.onchange = (event) => {
-    [...event.target.files].forEach(file=>{
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = JSON.parse(e.target.result);
-        addImportedPolyline(data);
-      };
-      reader.readAsText(file);
-    })
 
-  };
-  input.click();
+// 新增：通过 fileAccessBridge 导入路线
+async function importFromFileAccessBridge() {
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+
+    // 获取当前路径下的所有项目（文件和目录）
+    let itemsJson = await fileAccessBridge.ListItems(currentPath.value);
+    const items = JSON.parse(itemsJson);
+
+    if (items.length === 0) {
+      Message.warning('当前目录为空');
+      return;
+    }
+
+    // 显示文件选择对话框
+    showFileSelectDialog(items);
+
+  } catch (error) {
+    console.error('导入路线失败:', error);
+    Message.error('导入路线失败: ' + error.message);
+  }
+}
+
+// 修改：显示文件选择对话框
+function showFileSelectDialog(items) {
+  availableFiles.value = Array.isArray(items) ? items : [];
+  selectedFiles.value = [];
+  showFileSelectModal.value = true;
+}
+
+// 新增：进入目录
+async function enterDirectory(dirPath) {
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+    pathHistory.value.push(currentPath.value);
+    currentPath.value = dirPath;
+
+    const itemsJson = await fileAccessBridge.ListItems(currentPath.value);
+    const items = JSON.parse(itemsJson);
+    availableFiles.value = items;
+    selectedFiles.value = [];
+
+  } catch (error) {
+    console.error('进入目录失败:', error);
+    Message.error('进入目录失败: ' + error.message);
+  }
+}
+
+// 新增：返回上级目录
+async function goBack() {
+  if (pathHistory.value.length > 0) {
+    currentPath.value = pathHistory.value.pop();
+    try {
+      const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+      const itemsJson = await fileAccessBridge.ListItems(currentPath.value);
+      const items = JSON.parse(itemsJson);
+      availableFiles.value = items;
+      selectedFiles.value = [];
+    } catch (error) {
+      console.error('返回上级目录失败:', error);
+      Message.error('返回上级目录失败: ' + error.message);
+    }
+  }
+}
+
+// 新增：重置到根目录
+function resetToRoot() {
+  currentPath.value = '';
+  pathHistory.value = [];
+  importFromFileAccessBridge();
+}
+
+// 新增：获取文件图标
+function getFileIcon(item) {
+  if (item.IsDirectory) {
+    return '📁';
+  } else if (item.Name.endsWith('.json')) {
+    return '📄';
+  } else {
+    return '📋';
+  }
+}
+
+// 新增：检查是否为JSON文件
+function isJsonFile(item) {
+  return !item.IsDirectory && item.Name.endsWith('.json');
+}
+
+// 新增：获取选中的JSON文件数量
+const selectedJsonFileCount = computed(() => {
+  return selectedFiles.value.filter(filePath => {
+    const item = availableFiles.value.find(item => item.RelativePath === filePath);
+    return item && isJsonFile(item);
+  }).length;
+});
+
+// 修改：确认导入选中的文件
+async function confirmImportFiles() {
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+
+    // 只导入JSON文件
+    const jsonFiles = selectedFiles.value.filter(filePath => {
+      const item = availableFiles.value.find(item => item.RelativePath === filePath);
+      return item && isJsonFile(item);
+    });
+
+    if (jsonFiles.length === 0) {
+      Message.warning('请选择至少一个JSON文件');
+      return;
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const filePath of jsonFiles) {
+      try {
+        const content = await fileAccessBridge.ReadFile(filePath);
+        const data = JSON.parse(content);
+        addImportedPolyline(data, filePath); // 传递文件路径
+        successCount++;
+      } catch (error) {
+        console.error(`导入文件 ${filePath} 失败:`, error);
+        errorCount++;
+      }
+    }
+
+    showFileSelectModal.value = false;
+
+    if (successCount > 0) {
+      Message.success(`成功导入 ${successCount} 个路线文件`);
+    }
+    if (errorCount > 0) {
+      Message.error(`${errorCount} 个文件导入失败`);
+    }
+
+  } catch (error) {
+    console.error('导入文件失败:', error);
+    Message.error('导入文件失败: ' + error.message);
+  }
+}
+
+// 新增：关闭文件选择对话框时重置状态
+function closeFileSelectModal() {
+  showFileSelectModal.value = false;
+  currentPath.value = '';
+  pathHistory.value = [];
+  selectedFiles.value = [];
+}
+
+// 新增：通过 fileAccessBridge 保存路线
+async function saveToFileAccessBridge(data, fileName) {
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+    const json = JSON.stringify(data, null, 2);
+    const safeFileName = fileName.replace(/[<>:"/\\|?*]/g, '_') + '.json';
+
+    // 首先检查是否存在原始存储路径
+    const currentPolyline = polylines.value[selectedPolylineIndex.value];
+    let savePath = '';
+
+    // 如果路线有记录的存储路径，优先使用该路径
+    if (currentPolyline.savedPath) {
+      savePath = currentPolyline.savedPath;
+    } else {
+      // 没有记录的存储路径，使用当前路径和文件名
+      savePath = currentPath.value ?
+          `${currentPath.value}/${safeFileName}` :
+          safeFileName;
+
+      // 保存路径到路线对象中，方便下次使用
+      currentPolyline.savedPath = savePath;
+    }
+
+    await fileAccessBridge.WriteFile(savePath, json);
+    Message.success(`路线已保存到: ${savePath}`);
+
+  } catch (error) {
+    console.error('保存路线失败:', error);
+    Message.error('保存路线失败: ' + error.message);
+  }
+}
+
+// 修改 importPositions 函数，支持 fileAccessBridge
+function importPositions() {
+  if (mode === 'single') {
+    // 使用 fileAccessBridge 导入
+    importFromFileAccessBridge();
+  } else {
+    // 保持原有逻辑
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.multiple = true;
+    input.onchange = (event) => {
+      [...event.target.files].forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const data = JSON.parse(e.target.result);
+          addImportedPolyline(data);
+        };
+        reader.readAsText(file);
+      })
+    };
+    input.click();
+  }
 }
 
 // 添加重命名函数
@@ -353,12 +549,14 @@ function updatePolyline(layer) {
     }
   }
 }
-let preAuthor=(loadLocal("_preAuthor") || {}).preAuthor;
+
+let preAuthor = (loadLocal("_preAuthor") || {}).preAuthor;
+
 function exportPositions(index) {
   const polyline = polylines.value[index];
   // 检查 polyline.info 是否存在
   const info = polyline.info || {};
-  exportAuthor.value = info.author|| preAuthor || '' ; // 回填作者信息
+  exportAuthor.value = info.author || preAuthor || ''; // 回填作者信息
   exportVersion.value = info.version || ''; // 回填版本信息
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
@@ -375,31 +573,38 @@ function handleExport() {
       description: exportDescription.value, // 添加描述信息
       map_name: currentMapName.value, // 添加地图名字
       bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
-      ,tags:polyline.tags || []
-      ,last_modified_time:Date.now() //导出时间
-      ,enable_monster_loot_split:!!polyline.enable_monster_loot_split //区分怪物拾取
-      
+      , tags: polyline.tags || []
+      , last_modified_time: Date.now() //导出时间
+      , enable_monster_loot_split: !!polyline.enable_monster_loot_split //区分怪物拾取
+
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
-  if (!(polyline.info && polyline.info.author)){
+  if (!(polyline.info && polyline.info.author)) {
     preAuthor = exportAuthor.value;
-    saveLocal("_preAuthor",{preAuthor})
+    saveLocal("_preAuthor", {preAuthor})
   }
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${polyline.name}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  if (mode === 'single') {
+    // 使用 fileAccessBridge 保存
+    saveToFileAccessBridge(data, polyline.name);
+  } else {
+    // 保持原有逻辑
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${polyline.name}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   showExportModal.value = false;
 }
 
 const selectedPolyline = computed(() => {
   const polyline = polylines.value[selectedPolylineIndex.value];
-  return polyline ? { ...polyline, positions: [...polyline.positions] } : { positions: [] };
+  return polyline ? {...polyline, positions: [...polyline.positions]} : {positions: []};
 });
 
 function selectPolyline(index) {
@@ -413,7 +618,7 @@ function deletePolyline(index) {
     title: '确认删除',
     content: '确定要删除该路线吗？此操作不可撤销。',
     okText: '删除',
-    okButtonProps: { status: 'danger' },
+    okButtonProps: {status: 'danger'},
     cancelText: '取消',
     onOk: () => {
       map.value.removeLayer(polylines.value[index].layer);
@@ -442,55 +647,55 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
 
 // 添加动作选项
 const actionOptions = [
-  { label: '无', value: '' },
-  { label: '战斗', value: 'fight' },
-  { label: '简易策略脚本', value: 'combat_script' },
-  { label: '纳西妲长E收集', value: 'nahida_collect' },
-  { label: '下落攻击', value: 'stop_flying' },
-  { label: '强制传送', value: 'force_tp' },
-  { label: '四叶印', value: 'up_down_grab_leaf' },
-  { label: '挖矿', value: 'mining' },
-  { label: '钓鱼', value: 'fishing' },
-  { label: '设置时间', value: 'set_time'},
-  { label: '在附近拾取', value: 'pick_around' },
-  { label: '水元素力采集', value: 'hydro_collect' },
-  { label: '雷元素力采集', value: 'electro_collect' },
-  { label: '风元素力采集', value: 'anemo_collect' },
-  { label: '火元素力采集', value: 'pyro_collect' },
-  { label: '输出日志', value: 'log_output' },
-  { label: '退出重新登录', value: 'exit_and_relogin' },
+  {label: '无', value: ''},
+  {label: '战斗', value: 'fight'},
+  {label: '简易策略脚本', value: 'combat_script'},
+  {label: '纳西妲长E收集', value: 'nahida_collect'},
+  {label: '下落攻击', value: 'stop_flying'},
+  {label: '强制传送', value: 'force_tp'},
+  {label: '四叶印', value: 'up_down_grab_leaf'},
+  {label: '挖矿', value: 'mining'},
+  {label: '钓鱼', value: 'fishing'},
+  {label: '设置时间', value: 'set_time'},
+  {label: '在附近拾取', value: 'pick_around'},
+  {label: '水元素力采集', value: 'hydro_collect'},
+  {label: '雷元素力采集', value: 'electro_collect'},
+  {label: '风元素力采集', value: 'anemo_collect'},
+  {label: '火元素力采集', value: 'pyro_collect'},
+  {label: '输出日志', value: 'log_output'},
+  {label: '退出重新登录', value: 'exit_and_relogin'},
 ];
 
 
 const actionOptionsTree = [
-  { label: '无', value: '' },
-  { label: '战斗', value: 'fight' },
-  { label: '简易策略脚本', value: 'combat_script' },
-  { label: '纳西妲长E收集', value: 'nahida_collect' },
-  { label: '下落攻击', value: 'stop_flying' },
-  { label: '强制传送', value: 'force_tp' },
-  { label: '四叶印', value: 'up_down_grab_leaf' },
-  { label: '挖矿', value: 'mining' },
-  { label: '钓鱼', value: 'fishing' },
+  {label: '无', value: ''},
+  {label: '战斗', value: 'fight'},
+  {label: '简易策略脚本', value: 'combat_script'},
+  {label: '纳西妲长E收集', value: 'nahida_collect'},
+  {label: '下落攻击', value: 'stop_flying'},
+  {label: '强制传送', value: 'force_tp'},
+  {label: '四叶印', value: 'up_down_grab_leaf'},
+  {label: '挖矿', value: 'mining'},
+  {label: '钓鱼', value: 'fishing'},
 
-  { label: '在附近拾取', value: 'pick_around' },
+  {label: '在附近拾取', value: 'pick_around'},
   {
     label: '元素力采集',
     value: 'element',
     children: [
-      { label: '水元素力采集', value: 'hydro_collect' },
-      { label: '雷元素力采集', value: 'electro_collect' },
-      { label: '风元素力采集', value: 'anemo_collect' },
-      { label: '火元素力采集', value: 'pyro_collect' },
+      {label: '水元素力采集', value: 'hydro_collect'},
+      {label: '雷元素力采集', value: 'electro_collect'},
+      {label: '风元素力采集', value: 'anemo_collect'},
+      {label: '火元素力采集', value: 'pyro_collect'},
     ]
   },
   {
     label: '其他',
     value: 'system',
     children: [
-      { label: '输出日志', value: 'log_output' },
-      { label: '退出重新登录', value: 'exit_and_relogin' },
-      { label: '设置时间', value: 'set_time'},
+      {label: '输出日志', value: 'log_output'},
+      {label: '退出重新登录', value: 'exit_and_relogin'},
+      {label: '设置时间', value: 'set_time'},
     ]
   }
 ];
@@ -511,29 +716,36 @@ function handleChange(newData) {
   });
   polyline.layer.setLatLngs(latlngs);
 }
-function moreSelect(v){
-  v.onclick.call(null,v.record,v.rowIndex);
+
+function moreSelect(v) {
+  v.onclick.call(null, v.record, v.rowIndex);
 }
-function copyPosition(record,rowIndex){
+
+function copyPosition(record, rowIndex) {
   const polyline = polylines.value[selectedPolylineIndex.value];
-  polyline.positions.splice(rowIndex, 0,Object.assign({},record,{locked:false}));
+  polyline.positions.splice(rowIndex, 0, Object.assign({}, record, {locked: false}));
   updateMapFromPolyLine(polyline);
 }
-function lockRowIndex(record,rowIndex){
-  polylines.value[selectedPolylineIndex.value].positions.forEach((item,index)=>{item.locked=false;});
-  record.locked=true;
-}
-function unlockRowIndex(record,rowIndex){
-  record.locked=false;
+
+function lockRowIndex(record, rowIndex) {
+  polylines.value[selectedPolylineIndex.value].positions.forEach((item, index) => {
+    item.locked = false;
+  });
+  record.locked = true;
 }
 
-const setPositionRowClass=(record,rowIndex)=>{
+function unlockRowIndex(record, rowIndex) {
+  record.locked = false;
+}
 
-  if (record.locked){
+const setPositionRowClass = (record, rowIndex) => {
+
+  if (record.locked) {
     return "locked";
   }
   return "";
 }
+
 // 添加删除点位的函数
 function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
@@ -541,10 +753,11 @@ function deletePosition(index) {
   updateMapFromPolyLine(polyline);
 
 }
+
 // 更新地图上的折线
-const updateMapFromPolyLine=(polyline)=>{
+const updateMapFromPolyLine = (polyline) => {
   //更新序号
-  polyline.positions.forEach((item,index)=>item.id=index+1);
+  polyline.positions.forEach((item, index) => item.id = index + 1);
   //更新折线图
   const latlngs = polyline.positions.map(pos => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
@@ -559,15 +772,16 @@ function openAddPointModal() {
   newPointY.value = 0;
   newPointName.value = '';
 }
-function clearPoints(){
+
+function clearPoints() {
   Modal.confirm({
     title: '请确认',
     content: '确定要清除所有点位吗，此操作不可逆？',
     okText: '确认',
     cancelText: '取消',
     onOk: () => {
-      if (polylines.value[selectedPolylineIndex.value]){
-        polylines.value[selectedPolylineIndex.value].positions=[];
+      if (polylines.value[selectedPolylineIndex.value]) {
+        polylines.value[selectedPolylineIndex.value].positions = [];
       }
     },
     onCancel: () => {
@@ -576,6 +790,7 @@ function clearPoints(){
   });
 
 }
+
 function addNewPoint(x, y) {
   const main1024Pos = coordinateConverter.value.gameToMain1024(x, y);
   const newPoint = {
@@ -585,7 +800,7 @@ function addNewPoint(x, y) {
     type: 'path',
     move_mode: 'walk',
     action: '',
-    action_params:''
+    action_params: ''
   };
 
   if (selectedPolylineIndex.value === -1 || polylines.value.length === 0) {
@@ -601,22 +816,22 @@ function addNewPoint(x, y) {
     // 添加新点位到现有路径
     const polyline = polylines.value[selectedPolylineIndex.value];
     newPoint.id = polyline.positions.length + 1;
-    if(polyline.positions.length===0){
-      newPoint.type="teleport";
+    if (polyline.positions.length === 0) {
+      newPoint.type = "teleport";
     }
-    let lockedIndex=polyline.positions.findIndex(item=>item.locked);
-    if (lockedIndex>-1){
-      polyline.positions.splice(lockedIndex,0,newPoint);
-    }else{
+    let lockedIndex = polyline.positions.findIndex(item => item.locked);
+    if (lockedIndex > -1) {
+      polyline.positions.splice(lockedIndex, 0, newPoint);
+    } else {
       polyline.positions.push(newPoint);
     }
 
 
     // 更新地图上的折线
     updateMapFromPolyLine(polyline)
-/*    const latlngs = polyline.layer.getLatLngs();
-    latlngs.push(L.latLng(main1024Pos.y, main1024Pos.x));
-    polyline.layer.setLatLngs(latlngs);*/
+    /*    const latlngs = polyline.layer.getLatLngs();
+        latlngs.push(L.latLng(main1024Pos.y, main1024Pos.x));
+        polyline.layer.setLatLngs(latlngs);*/
   }
 }
 
@@ -659,20 +874,20 @@ function selectPoint(record, rowIndex) {
 
 //战斗策略管理
 console.log('vue')
-const combatScriptKey="_combatScriptData";
-const getCombatScriptByLocal=()=>{
-  return (loadLocal(combatScriptKey)||[]);
+const combatScriptKey = "_combatScriptData";
+const getCombatScriptByLocal = () => {
+  return (loadLocal(combatScriptKey) || []);
 }
-const showAddCombatScript =ref(false);
-const combatScriptData=ref(getCombatScriptByLocal());
-const showCombatScriptManagerModal=ref(false);
-const combatScriptManagerModal=()=>{
-  showCombatScriptManagerModal.value=true;
+const showAddCombatScript = ref(false);
+const combatScriptData = ref(getCombatScriptByLocal());
+const showCombatScriptManagerModal = ref(false);
+const combatScriptManagerModal = () => {
+  showCombatScriptManagerModal.value = true;
 }
 
-const saveCombatScript=()=>{
+const saveCombatScript = () => {
   //const val=[{value:"钟离 e(hold);坎蒂丝 e(hold);雷泽 e(hold);卡齐娜 e;凝光 attack(0.2),attack(0.2),attack(0.2),attack(0.2),attack(0.2)",def:true}];
- // saveLocal(combatScriptKey,val);
+  // saveLocal(combatScriptKey,val);
   //combatScriptData.value=getCombatScriptByLocal();
 
 }
@@ -682,45 +897,45 @@ const actionChange = (record) => {
   if (Array.isArray(record.action)) {
     record.action = record.action[record.action.length - 1];
   }
-  if (record.action === "combat_script"){
-    record.action_params=(combatScriptData.value.find(item=>item.def) || {}).value;
-  }else{
-    record.action_params="";
+  if (record.action === "combat_script") {
+    record.action_params = (combatScriptData.value.find(item => item.def) || {}).value;
+  } else {
+    record.action_params = "";
   }
 }
-const newActionParams=ref({value:"",def:false});
-const addCombatScript=()=>{
- const newActionParamsTemp=Object.assign({},newActionParams.value);
-  if (combatScriptData.value.find(item=>item.value === newActionParamsTemp.value )){
+const newActionParams = ref({value: "", def: false});
+const addCombatScript = () => {
+  const newActionParamsTemp = Object.assign({}, newActionParams.value);
+  if (combatScriptData.value.find(item => item.value === newActionParamsTemp.value)) {
     alert("不要重复添加！");
-  }else{
-     const temp=combatScriptData.value;
-     //只能一个默认
-     if (newActionParamsTemp.def){
-       temp.forEach((item,index)=>{
-         item.def = false;
-       })
-     }
-    newActionParams.value={value:"",def:false};
-    combatScriptData.value=[...temp,newActionParamsTemp];
-    saveLocal(combatScriptKey,combatScriptData.value);
+  } else {
+    const temp = combatScriptData.value;
+    //只能一个默认
+    if (newActionParamsTemp.def) {
+      temp.forEach((item, index) => {
+        item.def = false;
+      })
+    }
+    newActionParams.value = {value: "", def: false};
+    combatScriptData.value = [...temp, newActionParamsTemp];
+    saveLocal(combatScriptKey, combatScriptData.value);
 
   }
 
 }
-const deleteCombatScriptPosition=index=>{
-  combatScriptData.value.splice(index,1);
-  saveLocal(combatScriptKey,combatScriptData.value);
+const deleteCombatScriptPosition = index => {
+  combatScriptData.value.splice(index, 1);
+  saveLocal(combatScriptKey, combatScriptData.value);
 }
-const changeCombatScriptDef=(rowindex)=>{
-  if (combatScriptData.value[rowindex].def){
-    combatScriptData.value.forEach((item,index)=>{
-      if (index!==rowindex){
-        item.def=false;
+const changeCombatScriptDef = (rowindex) => {
+  if (combatScriptData.value[rowindex].def) {
+    combatScriptData.value.forEach((item, index) => {
+      if (index !== rowindex) {
+        item.def = false;
       }
     })
   }
-  saveLocal(combatScriptKey,combatScriptData.value);
+  saveLocal(combatScriptKey, combatScriptData.value);
 }
 const combatScriptColumns = [
   {
@@ -730,12 +945,12 @@ const combatScriptColumns = [
   {
     title: '是否默认',
     dataIndex: 'def',
-    slotName:'def'
+    slotName: 'def'
   },
   {
     title: '操作',
     dataIndex: 'operations',
-    slotName:'operations'
+    slotName: 'operations'
   }]
 
 //点位扩展参数 
@@ -744,78 +959,84 @@ const combatScriptColumns = [
 //unrecognized,pathTooFar,all
 //取上一个识别到的点位置，大地图识别，特定时间到达
 //previousDetectedPoint,mapRecognition,scheduledArrival
-const defaultPointExtParams={misidentification:{type:["unrecognized"],handling_mode:"previousDetectedPoint",arrival_time:0},description:"",monster_tag:""};
+const defaultPointExtParams = {
+  misidentification: {
+    type: ["unrecognized"],
+    handling_mode: "previousDetectedPoint",
+    arrival_time: 0
+  }, description: "", monster_tag: ""
+};
 
-const pointExtParams=ref(Object.assign({},defaultPointExtParams));
-const showPointExtConfig=ref(false);
+const pointExtParams = ref(Object.assign({}, defaultPointExtParams));
+const showPointExtConfig = ref(false);
 let curPointRecord;
-const  editPointExtParams = (record,rowIndex)=>{
-  pointExtParams.value = record.point_ext_params || Object.assign({},JSON.parse(JSON.stringify(defaultPointExtParams)));
+const editPointExtParams = (record, rowIndex) => {
+  pointExtParams.value = record.point_ext_params || Object.assign({}, JSON.parse(JSON.stringify(defaultPointExtParams)));
   showPointExtConfig.value = true;
-  curPointRecord=record;
+  curPointRecord = record;
 }
-const  savePointExtParams = ()=>{
- if (curPointRecord){
-   curPointRecord.point_ext_params= JSON.parse(JSON.stringify(pointExtParams.value));
- }
+const savePointExtParams = () => {
+  if (curPointRecord) {
+    curPointRecord.point_ext_params = JSON.parse(JSON.stringify(pointExtParams.value));
+  }
 
 }
-const  deletePointExtParams = (record,rowIndex)=>{
+const deletePointExtParams = (record, rowIndex) => {
   delete record.point_ext_params;
 }
 
 
 //标签管理
-const commonTagKey="_commonTag";
+const commonTagKey = "_commonTag";
 //const commonTag = ref([]);
 const otherConfig = ref({
-  commonTag:[]
-  ,enableMonsterLootSplit:false
+  commonTag: []
+  , enableMonsterLootSplit: false
 })
 const showCommonTagManager = ref(false);
-const polylineTagsSelectIndex=ref(-1);
-const commonTagManagerModal = (index)=>{
+const polylineTagsSelectIndex = ref(-1);
+const commonTagManagerModal = (index) => {
   otherConfig.value.commonTag = polylines.value[index].tags || [];
-  otherConfig.value.enableMonsterLootSplit= !!polylines.value[index].enable_monster_loot_split;
-  polylineTagsSelectIndex.value=index;
+  otherConfig.value.enableMonsterLootSplit = !!polylines.value[index].enable_monster_loot_split;
+  polylineTagsSelectIndex.value = index;
   showCommonTagManager.value = true;
 }
-const saveCommonTagManagerModal = ()=>{
-  polylines.value[polylineTagsSelectIndex.value].tags=otherConfig.value.commonTag;
+const saveCommonTagManagerModal = () => {
+  polylines.value[polylineTagsSelectIndex.value].tags = otherConfig.value.commonTag;
   polylines.value[polylineTagsSelectIndex.value].enable_monster_loot_split = otherConfig.value.enableMonsterLootSplit;
 }
 const commonTagChange = () => {
-  let tags=otherConfig.value.commonTag;
-  const newTags=[];
+  let tags = otherConfig.value.commonTag;
+  const newTags = [];
   for (let i = 0; i < tags.length; i++) {
-    let tag=tags[i];
-    tag=tag.replaceAll("，",",");
-    tag.split(",").filter(t=>t).forEach(t=>newTags[newTags.length]=t);
+    let tag = tags[i];
+    tag = tag.replaceAll("，", ",");
+    tag.split(",").filter(t => t).forEach(t => newTags[newTags.length] = t);
   }
-  otherConfig.value.commonTag=newTags;
+  otherConfig.value.commonTag = newTags;
 }
 
 //合并
-const mergedPolyline=()=>{
+const mergedPolyline = () => {
 
-  const newPos=[];
-  polylines.value.forEach(polyline=>{
-    polyline.positions.forEach(p=>{
-      newPos[newPos.length]=p;
+  const newPos = [];
+  polylines.value.forEach(polyline => {
+    polyline.positions.forEach(p => {
+      newPos[newPos.length] = p;
     });
   });
-  polylines.value[0].positions=newPos;
+  polylines.value[0].positions = newPos;
   for (let i = 1; i < polylines.value.length; i++) {
     map.value.removeLayer(polylines.value[i].layer);
   }
-  polylines.value=[polylines.value[0]];
+  polylines.value = [polylines.value[0]];
   updateMapFromPolyLine(polylines.value[0]);
   selectPolyline(0);
 }
 //拆分
-const splitPolyline=()=>{
+const splitPolyline = () => {
 
-  const  positions=polylines.value[selectedPolylineIndex.value].positions;
+  const positions = polylines.value[selectedPolylineIndex.value].positions;
   const result = [];
 
   let currentGroup = [];
@@ -837,20 +1058,21 @@ const splitPolyline=()=>{
   }
 
 
-  polylines.value[0].positions=result[0];
+  polylines.value[0].positions = result[0];
   updateMapFromPolyLine(polylines.value[0]);
   selectPolyline(0);
   for (let i = 1; i < result.length; i++) {
-    let pl=Object.assign({},polylines.value[0],{positions:result[i]});
+    let pl = Object.assign({}, polylines.value[0], {positions: result[i]});
     delete pl.layer;
-    pl=JSON.parse(JSON.stringify(pl));
-    pl.name = pl.name+"_"+(i+1);
+    pl = JSON.parse(JSON.stringify(pl));
+    pl.name = pl.name + "_" + (i + 1);
     addSpliePolyline(pl);
     updateMapFromPolyLine(polylines.value[i]);
     selectPolyline(i);
   }
 
 }
+
 function addSpliePolyline(importedData) {
   const layer = L.polyline(importedData.positions.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
@@ -860,28 +1082,30 @@ function addSpliePolyline(importedData) {
     weight: 3,
   }).addTo(map.value);
   layer.on('pm:edit', handleMapPointChange);
-  importedData.layer=layer;
+  importedData.layer = layer;
   polylines.value.push(importedData);
 }
-const showEditPointModal=ref(false);
-const curUpdatePosition=ref({});
-const curUpdatrowIndex=ref({});
 
-const editPointModal=(record,rowIndex)=>{
-  newPointX.value=record.x;
-  newPointY.value=record.y;
-  curUpdatePosition.value=record;
-  curUpdatrowIndex.value=rowIndex;
+const showEditPointModal = ref(false);
+const curUpdatePosition = ref({});
+const curUpdatrowIndex = ref({});
+
+const editPointModal = (record, rowIndex) => {
+  newPointX.value = record.x;
+  newPointY.value = record.y;
+  curUpdatePosition.value = record;
+  curUpdatrowIndex.value = rowIndex;
   showEditPointModal.value = true;
-  selectPoint(record,rowIndex);
+  selectPoint(record, rowIndex);
 };
-const updatePointModal=()=>{
-  curUpdatePosition.value.x=newPointX.value;
-  curUpdatePosition.value.y=newPointY.value;
+const updatePointModal = () => {
+  curUpdatePosition.value.x = newPointX.value;
+  curUpdatePosition.value.y = newPointY.value;
   showEditPointModal.value = false;
-  updateMapFromTable(selectedPolylineIndex.value,curUpdatrowIndex.value);
-  selectPoint(curUpdatePosition.value,curUpdatrowIndex.value);
+  updateMapFromTable(selectedPolylineIndex.value, curUpdatrowIndex.value);
+  selectPoint(curUpdatePosition.value, curUpdatrowIndex.value);
 };
+
 function formatNumber(num) {
   // 保留两位小数，但去掉多余的 0
   let str = num.toFixed(2);
@@ -919,9 +1143,9 @@ function formatNumber(num) {
               <a-list-item>
                 <a-space>
                   <a-input
-                    v-model="item.name"
-                    @change="(value) => renamePolyline(index, value)"
-                    style="width: 150px;"
+                      v-model="item.name"
+                      @change="(value) => renamePolyline(index, value)"
+                      style="width: 150px;"
                   />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
                   <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">其他设置</a-button>
@@ -934,33 +1158,35 @@ function formatNumber(num) {
         </a-card>
         <a-card :title="`点位信息 - ${selectedPolyline.name || '未选择路径'}`">
           <a-table
-            :columns="columns"
-            :data="selectedPolyline.positions"
-            :pagination="false"
-            :draggable="{ type: 'handle', width: 40 }"
-            @change="handleChange"
-            @row-click="selectPoint"
-            :row-class="setPositionRowClass"
+              :columns="columns"
+              :data="selectedPolyline.positions"
+              :pagination="false"
+              :draggable="{ type: 'handle', width: 40 }"
+              @change="handleChange"
+              @row-click="selectPoint"
+              :row-class="setPositionRowClass"
           >
             <template #drag-handle-icon>
-              <icon-drag-dot-vertical />
+              <icon-drag-dot-vertical/>
             </template>
-            <template #id="{ record, rowIndex }" >
-              <span :style="{color:(record.point_ext_params?'blue':'')}">{{record.id}}</span>
+            <template #id="{ record, rowIndex }">
+              <span :style="{color:(record.point_ext_params?'blue':'')}">{{ record.id }}</span>
             </template>
-            <template #xy="{ record, rowIndex }" >
-              <a-button type="text" @click="editPointModal(record,rowIndex)">{{formatNumber(record.x)}}, {{formatNumber(record.y)}}</a-button>
+            <template #xy="{ record, rowIndex }">
+              <a-button type="text" @click="editPointModal(record,rowIndex)">{{ formatNumber(record.x) }},
+                {{ formatNumber(record.y) }}
+              </a-button>
             </template>
-           <template #x="{ record, rowIndex }">
+            <template #x="{ record, rowIndex }">
               <a-input-number
-                v-model="record.x"
-                @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
+                  v-model="record.x"
+                  @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
               />
             </template>
             <template #y="{ record, rowIndex }">
               <a-input-number
-                v-model="record.y"
-                @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'y', value)"
+                  v-model="record.y"
+                  @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'y', value)"
               />
             </template>
             <template #move_mode="{ record }">
@@ -975,11 +1201,11 @@ function formatNumber(num) {
               </a-select>
             </template>
             <template #action="{ record }">
-<!--              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
-                <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
-                  {{ option.label }}
-                </a-option>
-              </a-select>-->
+              <!--              <a-select v-model="record.action" @change="actionChange(record)" style="min-width: 120px">
+                              <a-option v-for="option in actionOptions" :key="option.value" :value="option.value" >
+                                {{ option.label }}
+                              </a-option>
+                            </a-select>-->
               <a-cascader
                   v-model="record.action"
                   :options="actionOptionsTree"
@@ -988,10 +1214,14 @@ function formatNumber(num) {
                   style="min-width: 120px"
                   :field-names="{ label: 'label', value: 'value', children: 'children' }"
               />
-              <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params" :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志" strict />
-              <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"  placeholder="录入下落攻击等待时间(毫秒)" strict />
-              <a-input allow-clear v-if="record.action==='set_time'" v-model="record.action_params"  placeholder="录入需要设置的时间 HH:MM" strict />
-              <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'" v-model="record.action_params"  placeholder="录入或清空后选择策略" strict />
+              <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params"
+                       :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志" strict/>
+              <a-input allow-clear v-if="record.action==='stop_flying'" v-model="record.action_params"
+                       placeholder="录入下落攻击等待时间(毫秒)" strict/>
+              <a-input allow-clear v-if="record.action==='set_time'" v-model="record.action_params"
+                       placeholder="录入需要设置的时间 HH:MM" strict/>
+              <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'"
+                               v-model="record.action_params" placeholder="录入或清空后选择策略" strict/>
 
             </template>
             <template #type="{ record }">
@@ -1004,39 +1234,50 @@ function formatNumber(num) {
             </template>
             <template #operations="{ record, rowIndex }">
               <a-button
-                @click="deletePosition(rowIndex)"
-                status="danger"
-                size="small"
+                  @click="deletePosition(rowIndex)"
+                  status="danger"
+                  size="small"
               >
                 删除
               </a-button>
 
 
-              <a-dropdown @select="moreSelect" >
-                <a-button style="margin-left: 10px"  status="success" >更多</a-button>
+              <a-dropdown @select="moreSelect">
+                <a-button style="margin-left: 10px" status="success">更多</a-button>
                 <template #content>
                   <a-doption :value="{ onclick: copyPosition,record,rowIndex}">复制</a-doption>
-                  <a-doption :value="{ onclick: editPointExtParams,record,rowIndex}" >{{(record.point_ext_params?"修改":"新增") + "扩展参数"}}</a-doption>
-                  <a-doption :value="{ onclick: deletePointExtParams,record,rowIndex}"  v-if="record.point_ext_params">清除扩展参数</a-doption>
+                  <a-doption :value="{ onclick: editPointExtParams,record,rowIndex}">
+                    {{ (record.point_ext_params ? "修改" : "新增") + "扩展参数" }}
+                  </a-doption>
+                  <a-doption :value="{ onclick: deletePointExtParams,record,rowIndex}" v-if="record.point_ext_params">
+                    清除扩展参数
+                  </a-doption>
                   <a-doption :value="{ onclick: lockRowIndex,record,rowIndex}" v-if="!record.locked">锁定行</a-doption>
-                  <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}"  v-if="record.locked">解锁行</a-doption>
+                  <a-doption :value="{ onclick: unlockRowIndex,record,rowIndex}" v-if="record.locked">解锁行</a-doption>
                 </template>
               </a-dropdown>
-              <sapn style="color:red"  v-if="record.locked">↑↑↑</sapn>
+              <sapn style="color:red" v-if="record.locked">↑↑↑</sapn>
             </template>
           </a-table>
 
           <template #extra>
-            <a-button @click="clearPoints" type="primary" size="small" >清空</a-button>
-            <a-popconfirm  content="是否确认合并！"  @ok="mergedPolyline" okText="确认" cancelText="关闭">
-              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并</a-button>
+            <a-button @click="clearPoints" type="primary" size="small">清空</a-button>
+            <a-popconfirm content="是否确认合并！" @ok="mergedPolyline" okText="确认" cancelText="关闭">
+              <a-button type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并
+              </a-button>
             </a-popconfirm>
-            <a-popconfirm  content="是否确认按传送点进行拆分！"  @ok="splitPolyline" okText="确认" cancelText="关闭">
-              <a-button  type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length == 1  && polylines[selectedPolylineIndex].positions.filter(item=>item.type=='teleport').length>1">拆分</a-button>
+            <a-popconfirm content="是否确认按传送点进行拆分！" @ok="splitPolyline" okText="确认" cancelText="关闭">
+              <a-button type="primary" style="margin-left: 20px;" size="small"
+                        v-if="polylines.length == 1  && polylines[selectedPolylineIndex].positions.filter(item=>item.type=='teleport').length>1">
+                拆分
+              </a-button>
             </a-popconfirm>
 
-            <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">战斗策略管理</a-button>
-            <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位</a-button>
+            <a-button @click="combatScriptManagerModal" type="primary" style="margin-left: 20px;" size="small">
+              战斗策略管理
+            </a-button>
+            <a-button @click="openAddPointModal" type="primary" size="small" style="margin-left: 20px;">添加点位
+            </a-button>
           </template>
         </a-card>
       </a-space>
@@ -1054,8 +1295,9 @@ function formatNumber(num) {
     <a-form size="mini">
       <a-row :gutter="24">
         <a-col :span="24">
-          <a-form-item label="怪物标签：" size="mini"  tooltip="为此点位打上标签，后续可能根据怪物种类决定是否拾取设置等逻辑。">
-            <a-select v-model="pointExtParams.monster_tag" allow-clear> 
+          <a-form-item label="怪物标签：" size="mini"
+                       tooltip="为此点位打上标签，后续可能根据怪物种类决定是否拾取设置等逻辑。">
+            <a-select v-model="pointExtParams.monster_tag" allow-clear>
               <a-option value="normal">小怪</a-option>
               <a-option value="elite">精英</a-option>
               <a-option value="legendary">传奇</a-option>
@@ -1066,7 +1308,8 @@ function formatNumber(num) {
       </a-row>
       <a-row :gutter="24">
         <a-col :span="24">
-          <a-form-item label="异常识别：" size="mini" :content-flex="false" :merge-props="false" allow-clear  tooltip="当遇到点位无法识别时，用其他方式来解决无法识别的情况，编辑器如果无法识别点位，可以用编辑线的方式加点位。">
+          <a-form-item label="异常识别：" size="mini" :content-flex="false" :merge-props="false" allow-clear
+                       tooltip="当遇到点位无法识别时，用其他方式来解决无法识别的情况，编辑器如果无法识别点位，可以用编辑线的方式加点位。">
 
             <a-space direction="vertical" fill>
               <a-form-item field="misidentification.type" label="类型" tooltip="当小地图特征点比较少时，会出现点位无法识别或识别到其他位置的问题，
@@ -1080,7 +1323,7 @@ function formatNumber(num) {
               </a-form-item>
               <a-row :gutter="8">
                 <a-col :span="12">
-                  <a-form-item field="misidentification.handling_mode" label="处理方式"  label-col-flex="100px" tooltip="
+                  <a-form-item field="misidentification.handling_mode" label="处理方式" label-col-flex="100px" tooltip="
 取上一个识别到的点位置:即当未识别时，拿上一次能正确识别的点。
 大地图识别：即当未识别时，打开大地图，取中心点坐标，当中心点也识别不到时，取上一个识别到的点位。
 特定时间到达：自行估算到达时间，不会尝试获取从小地图获取坐标，适用于纯平地，最好时最后一个点位。
@@ -1088,13 +1331,15 @@ function formatNumber(num) {
                     <a-select v-model="pointExtParams.misidentification.handling_mode" allow-clear>
                       <a-option value="previousDetectedPoint">取上一个识别到的点位置</a-option>
                       <a-option value="mapRecognition">大地图识别</a-option>
-<!--                      <a-option value="scheduledArrival">特定时间到达</a-option>-->
+                      <!--                      <a-option value="scheduledArrival">特定时间到达</a-option>-->
                     </a-select>
                   </a-form-item>
                 </a-col>
                 <a-col :span="12">
-                  <a-form-item field="misidentification.arrival_time" >
-                    <a-input-number v-model="pointExtParams.misidentification.arrival_time" v-if="pointExtParams.misidentification.handling_mode === 'scheduledArrival'" placeholder="毫秒" class="input-demo" :min="0" allow-clear/>
+                  <a-form-item field="misidentification.arrival_time">
+                    <a-input-number v-model="pointExtParams.misidentification.arrival_time"
+                                    v-if="pointExtParams.misidentification.handling_mode === 'scheduledArrival'"
+                                    placeholder="毫秒" class="input-demo" :min="0" allow-clear/>
                   </a-form-item>
                 </a-col>
               </a-row>
@@ -1105,21 +1350,19 @@ function formatNumber(num) {
       <a-row :gutter="24">
         <a-col :span="24">
           <a-form-item field="description" label="描述：">
-            <a-textarea v-model="pointExtParams.description" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
+            <a-textarea v-model="pointExtParams.description" placeholder="请输入描述"
+                        :auto-size="{ minRows: 3, maxRows: 5 }"/>
           </a-form-item>
         </a-col>
       </a-row>
 
 
-
-
-      
-<!--      <a-form-item label="策略参数">
-        <a-input v-model="pointExtParams.enable"  allow-clear />
-      </a-form-item>
-      <a-form-item   label="是否默认">
-        <a-checkbox :value="true" v-model="pointExtParams.def"></a-checkbox>
-      </a-form-item>-->
+      <!--      <a-form-item label="策略参数">
+              <a-input v-model="pointExtParams.enable"  allow-clear />
+            </a-form-item>
+            <a-form-item   label="是否默认">
+              <a-checkbox :value="true" v-model="pointExtParams.def"></a-checkbox>
+            </a-form-item>-->
     </a-form>
   </a-modal>
   <a-modal
@@ -1133,11 +1376,11 @@ function formatNumber(num) {
   >
 
     <a-space direction="vertical" size="large" fill>
-      <a-card >
+      <a-card>
 
-        <a-table :columns="combatScriptColumns" :data="combatScriptData"  :pagination="false">
+        <a-table :columns="combatScriptColumns" :data="combatScriptData" :pagination="false">
           <template #def="{ record, rowIndex }">
-            <a-checkbox :value="true" v-model="record.def"  @change="changeCombatScriptDef(rowIndex)"></a-checkbox>
+            <a-checkbox :value="true" v-model="record.def" @change="changeCombatScriptDef(rowIndex)"></a-checkbox>
           </template>
           <template #operations="{ record, rowIndex }">
             <a-button
@@ -1151,7 +1394,8 @@ function formatNumber(num) {
 
         </a-table>
         <template #extra>
-          <a-button @click="showAddCombatScript = true" type="primary" size="small" style="margin-left: 20px;">添加</a-button>
+          <a-button @click="showAddCombatScript = true" type="primary" size="small" style="margin-left: 20px;">添加
+          </a-button>
         </template>
       </a-card>
     </a-space>
@@ -1164,11 +1408,11 @@ function formatNumber(num) {
       @ok="addCombatScript"
       @cancel="showAddCombatScript = false"
   >
-    <a-form >
+    <a-form>
       <a-form-item label="策略参数">
-        <a-input v-model="newActionParams.value"  allow-clear />
+        <a-input v-model="newActionParams.value" allow-clear/>
       </a-form-item>
-      <a-form-item   label="是否默认">
+      <a-form-item label="是否默认">
         <a-checkbox :value="true" v-model="newActionParams.def"></a-checkbox>
       </a-form-item>
     </a-form>
@@ -1186,38 +1430,40 @@ function formatNumber(num) {
     <a-form size="mini">
       <a-row :gutter="24">
         <a-col :span="24">
-          <a-form-item label="标签" size="mini"  tooltip="为此点位打上标签，可供js等筛选。">
-            <a-input-tag v-model="otherConfig.commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+          <a-form-item label="标签" size="mini" tooltip="为此点位打上标签，可供js等筛选。">
+            <a-input-tag v-model="otherConfig.commonTag" @change="commonTagChange"
+                         placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
           </a-form-item>
         </a-col>
 
       </a-row>
       <a-row :gutter="24">
         <a-col :span="24">
-          <a-form-item label="区分怪物拾取" size="mini"  tooltip="只有启用此配置，在调度中的只拾取精英配置才会生效，如果该脚本无精英怪，则无脑开启即可（和调度器配置同时开启后，没有标记精英的点位，将不再拾取）。">
+          <a-form-item label="区分怪物拾取" size="mini"
+                       tooltip="只有启用此配置，在调度中的只拾取精英配置才会生效，如果该脚本无精英怪，则无脑开启即可（和调度器配置同时开启后，没有标记精英的点位，将不再拾取）。">
             <a-checkbox :value="true" v-model="otherConfig.enableMonsterLootSplit"></a-checkbox>
           </a-form-item>
         </a-col>
 
       </a-row>
     </a-form>
-    
+
   </a-modal>
-  
-  
+
+
   <!-- 添加点位的模态框 -->
   <a-modal
-    v-model:visible="showAddPointModal"
-    title="添加新点位"
-    @ok="handleAddPointFromModal"
-    @cancel="showAddPointModal = false"
+      v-model:visible="showAddPointModal"
+      title="添加新点位"
+      @ok="handleAddPointFromModal"
+      @cancel="showAddPointModal = false"
   >
     <a-form :model="{ x: newPointX, y: newPointY }">
       <a-form-item field="x" label="X坐标">
-        <a-input-number v-model="newPointX" placeholder="请输入X坐标" />
+        <a-input-number v-model="newPointX" placeholder="请输入X坐标"/>
       </a-form-item>
       <a-form-item field="y" label="Y坐标">
-        <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+        <a-input-number v-model="newPointY" placeholder="请输入Y坐标"/>
       </a-form-item>
     </a-form>
   </a-modal>
@@ -1229,48 +1475,161 @@ function formatNumber(num) {
   >
     <a-form :model="{ x: newPointX, y: newPointY }">
       <a-form-item field="x" label="X坐标">
-        <a-input-number v-model="newPointX" placeholder="请输入X坐标" />
+        <a-input-number v-model="newPointX" placeholder="请输入X坐标"/>
       </a-form-item>
       <a-form-item field="y" label="Y坐标">
-        <a-input-number v-model="newPointY" placeholder="请输入Y坐标" />
+        <a-input-number v-model="newPointY" placeholder="请输入Y坐标"/>
       </a-form-item>
     </a-form>
   </a-modal>
   <!-- 导出模态框 -->
   <a-modal
-    v-model:visible="showExportModal"
-    title="导出路径"
-    @ok="handleExport"
-    @cancel="showExportModal = false"
+      v-model:visible="showExportModal"
+      title="导出路径"
+      @ok="handleExport"
+      @cancel="showExportModal = false"
   >
     <a-form :model="{ author: exportAuthor, version: exportVersion }">
       <a-form-item field="author" label="作者">
-        <a-input v-model="exportAuthor" placeholder="请输入作者" />
+        <a-input v-model="exportAuthor" placeholder="请输入作者"/>
       </a-form-item>
       <a-form-item field="version" label="版本">
-        <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始" />
+        <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始"/>
       </a-form-item>
       <a-form-item field="description" label="描述">
-        <a-textarea v-model="exportDescription" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }" />
+        <a-textarea v-model="exportDescription" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }"/>
       </a-form-item>
     </a-form>
+  </a-modal>
+
+  <!-- 新增：文件选择对话框 -->
+  <a-modal
+      v-model:visible="showFileSelectModal"
+      title="选择要导入的路线文件"
+      @ok="confirmImportFiles"
+      @cancel="closeFileSelectModal"
+      :width="800"
+      :height="600"
+  >
+    <div style="height: 500px; display: flex; flex-direction: column;">
+      <!-- 路径导航栏 -->
+      <div style="margin-bottom: 16px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+        <a-space>
+          <a-button size="small" @click="resetToRoot" :disabled="!currentPath">
+            <template #icon>🏠</template>
+            根目录
+          </a-button>
+          <a-button size="small" @click="goBack" :disabled="pathHistory.length === 0">
+            <template #icon>⬅️</template>
+            返回
+          </a-button>
+          <span style="color: #666;">
+            当前路径: {{ currentPath || '根目录' }}
+          </span>
+        </a-space>
+      </div>
+
+      <!-- 文件列表 -->
+      <div style="flex: 1; overflow-y: auto; border: 1px solid #e5e6e8; border-radius: 4px;">
+        <a-list :data="availableFiles" :bordered="false">
+          <template #item="{ item }">
+            <a-list-item style="padding: 8px 16px;">
+              <div style="display: flex; align-items: center; width: 100%;">
+                <!-- 文件/目录图标和名称 -->
+                <div style="flex: 1; display: flex; align-items: center;">
+                  <span style="margin-right: 8px; font-size: 16px;">
+                    {{ getFileIcon(item) }}
+                  </span>
+
+                  <!-- 如果是目录，显示为可点击的链接 -->
+                  <a-button
+                      v-if="item.IsDirectory"
+                      type="text"
+                      @click="enterDirectory(item.RelativePath)"
+                      style="text-align: left; padding: 0;"
+                  >
+                    {{ item.Name }}
+                  </a-button>
+
+                  <!-- 如果是文件，显示为普通文本 -->
+                  <span v-else>{{ item.Name }}</span>
+                </div>
+
+                <!-- 文件信息 -->
+                <div style="color: #999; font-size: 12px; margin-right: 16px;">
+                  {{ new Date(item.LastModified).toLocaleString() }}
+                </div>
+
+                <!-- 选择框（仅对JSON文件显示） -->
+                <a-checkbox
+                    v-if="isJsonFile(item)"
+                    :model-value="selectedFiles.includes(item.RelativePath)"
+                    @change="(checked) => {
+                    if (checked) {
+                      selectedFiles.push(item.RelativePath);
+                    } else {
+                      const index = selectedFiles.indexOf(item.RelativePath);
+                      if (index > -1) {
+                        selectedFiles.splice(index, 1);
+                      }
+                    }
+                  }"
+                />
+
+                <!-- 非JSON文件的提示 -->
+                <span v-else-if="!item.IsDirectory" style="color: #ccc; font-size: 12px;">
+                  不可导入
+                </span>
+              </div>
+            </a-list-item>
+          </template>
+        </a-list>
+      </div>
+
+      <!-- 选择状态显示 -->
+      <div style="margin-top: 16px; padding: 8px; background: #f0f2f5; border-radius: 4px;">
+        <a-space>
+          <span>已选择 {{ selectedJsonFileCount }} 个JSON文件</span>
+          <a-button
+              v-if="selectedFiles.length > 0"
+              size="small"
+              @click="selectedFiles = []"
+          >
+            清空选择
+          </a-button>
+        </a-space>
+      </div>
+    </div>
+
+    <template #footer>
+      <a-space>
+        <a-button @click="closeFileSelectModal">取消</a-button>
+        <a-button
+            type="primary"
+            @click="confirmImportFiles"
+            :disabled="selectedJsonFileCount === 0"
+        >
+          导入选中的文件 ({{ selectedJsonFileCount }})
+        </a-button>
+      </a-space>
+    </template>
   </a-modal>
 </template>
 
 <script>
 const columns = [
-  { title: '#', dataIndex: 'id' , slotName: 'id'},
-  { title: '坐标', dataIndex: 'xy', slotName: 'xy' },
-/*  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
-  { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },*/
-  { title: '类型', dataIndex: 'type', slotName: 'type' },
-  { title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode' },
-  { title: '动作', dataIndex: 'action', slotName: 'action' },
-  { title: '操作', slotName: 'operations' },
+  {title: '#', dataIndex: 'id', slotName: 'id'},
+  {title: '坐标', dataIndex: 'xy', slotName: 'xy'},
+  /*  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
+    { title: 'Y坐标', dataIndex: 'y', slotName: 'y' },*/
+  {title: '类型', dataIndex: 'type', slotName: 'type'},
+  {title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode'},
+  {title: '动作', dataIndex: 'action', slotName: 'action'},
+  {title: '操作', slotName: 'operations'},
 ];
 </script>
 <style scoped>
-:deep(.arco-table-tr.locked td){
+:deep(.arco-table-tr.locked td) {
   border-top: 2px red solid;
 }
 </style>
@@ -1303,6 +1662,6 @@ const columns = [
 }
 
 .arco-table .arco-table-cell {
-    padding: 8px 8px !important;
+  padding: 8px 8px !important;
 }
 </style>
