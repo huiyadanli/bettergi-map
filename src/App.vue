@@ -8,7 +8,8 @@ import { CoordinateConverter } from './utils/coordinateConverter';
 import {Message, Modal} from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
 
-
+// 添加环境变量的引用
+const mode = import.meta.env.VITE_MODE;
 // 地图配置
 const mapConfigs = {
   Teyvat: {
@@ -207,6 +208,9 @@ function switchMap(mapName) {
 }
 
 function changeBgiMapSettingsName(mapName) {
+  if (mode !== 'single') {
+    return;
+  }
   try {
     const mapEditorWebBridge = chrome.webview.hostObjects.mapEditorWebBridge;
     const jsonString = mapEditorWebBridge.ChangeMapName(mapName);

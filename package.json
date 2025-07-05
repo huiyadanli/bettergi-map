@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:single": "vite build --config vite.config.single.js",
+    "build:single": "vite build --config vite.config.single.js --mode single",
     "preview": "vite preview"
   },
   "dependencies": {
