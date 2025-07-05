@@ -280,6 +280,7 @@ async function addImportedPolyline(importedData) {
   const newPolyline = {
     name: importedData.info.name,
     tags: importedData.info.tags || [],
+    enable_monster_loot_split:!!importedData.info.enable_monster_loot_split,
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -376,6 +377,7 @@ function handleExport() {
       bgi_version: import.meta.env.VITE_BGI_VERSION // 添加BGI版本信息
       ,tags:polyline.tags || []
       ,last_modified_time:Date.now() //导出时间
+      ,enable_monster_loot_split:!!polyline.enable_monster_loot_split //区分怪物拾取
       
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
@@ -765,26 +767,32 @@ const  deletePointExtParams = (record,rowIndex)=>{
 
 //标签管理
 const commonTagKey="_commonTag";
-const commonTag = ref([]);
+//const commonTag = ref([]);
+const otherConfig = ref({
+  commonTag:[]
+  ,enableMonsterLootSplit:false
+})
 const showCommonTagManager = ref(false);
 const polylineTagsSelectIndex=ref(-1);
 const commonTagManagerModal = (index)=>{
-  commonTag.value = polylines.value[index].tags || [];
+  otherConfig.value.commonTag = polylines.value[index].tags || [];
+  otherConfig.value.enableMonsterLootSplit= !!polylines.value[index].enable_monster_loot_split;
   polylineTagsSelectIndex.value=index;
   showCommonTagManager.value = true;
 }
 const saveCommonTagManagerModal = ()=>{
-  polylines.value[polylineTagsSelectIndex.value].tags=commonTag.value;
+  polylines.value[polylineTagsSelectIndex.value].tags=otherConfig.value.commonTag;
+  polylines.value[polylineTagsSelectIndex.value].enable_monster_loot_split = otherConfig.value.enableMonsterLootSplit;
 }
 const commonTagChange = () => {
-  let tags=commonTag.value;
+  let tags=otherConfig.value.commonTag;
   const newTags=[];
   for (let i = 0; i < tags.length; i++) {
     let tag=tags[i];
     tag=tag.replaceAll("，",",");
     tag.split(",").filter(t=>t).forEach(t=>newTags[newTags.length]=t);
   }
-  commonTag.value=newTags;
+  otherConfig.value.commonTag=newTags;
 }
 
 //合并
@@ -916,7 +924,7 @@ function formatNumber(num) {
                     style="width: 150px;"
                   />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
-                  <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">标签管理</a-button>
+                  <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">其他设置</a-button>
                   <a-button @click="deletePolyline(index)" status="danger" size="small">删除</a-button>
                   <a-button @click="exportPositions(index)" type="secondary" size="small">导出</a-button>
                 </a-space>
@@ -1168,14 +1176,32 @@ function formatNumber(num) {
   <!-- 标签管理 -->
   <a-modal
       v-model:visible="showCommonTagManager"
-      title="标签管理"
+      title="其他设置"
       @ok="saveCommonTagManagerModal"
       @cancel="showCommonTagManager = false"
       width="50%" height="50%"
       okText="保存"
       cancelText="关闭"
   >
-    <a-input-tag v-model="commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+    <a-form size="mini">
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="标签" size="mini"  tooltip="为此点位打上标签，可供js等筛选。">
+            <a-input-tag v-model="otherConfig.commonTag"  @change="commonTagChange" placeholder="输入文本后按Enter，如果录入内容带有逗号，则会拆分为多个标签" allow-clear/>
+          </a-form-item>
+        </a-col>
+
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="区分怪物拾取" size="mini"  tooltip="只有启用此配置，在调度中的只拾取精英配置才会生效，如果该脚本无精英怪，则无脑开启即可（和调度器配置同时开启后，没有标记精英的点位，将不再拾取）。">
+            <a-checkbox :value="true" v-model="otherConfig.enableMonsterLootSplit"></a-checkbox>
+          </a-form-item>
+        </a-col>
+
+      </a-row>
+    </a-form>
+    
   </a-modal>
   
   
