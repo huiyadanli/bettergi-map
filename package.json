@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:single": "vite --mode single",
     "build": "vite build",
     "build:single": "vite build --config vite.config.single.js --mode single",
     "preview": "vite preview"
