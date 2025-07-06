@@ -468,13 +468,29 @@ async function saveToFileAccessBridge(data, fileName) {
     const currentPolyline = polylines.value[selectedPolylineIndex.value];
     let savePath = '';
 
-    // 如果路线有记录的存储路径，优先使用该路径
+    // 如果路线有记录的存储路径，保留原路径的目录，但使用新的文件名
     if (currentPolyline.savedPath) {
-      savePath = currentPolyline.savedPath;
+      // 检测路径分隔符（Windows 使用 \，类 Unix 系统使用 /）
+      const pathSeparator = currentPolyline.savedPath.includes('/') ? '/' : '\\';
+
+      // 获取原路径的目录部分
+      const lastSeparatorIndex = currentPolyline.savedPath.lastIndexOf(pathSeparator);
+      const dirPath = lastSeparatorIndex !== -1 ?
+          currentPolyline.savedPath.substring(0, lastSeparatorIndex + 1) :
+          '';
+
+      // 组合目录与新文件名
+      savePath = dirPath + safeFileName;
+
+      // 更新保存路径到路线对象中
+      currentPolyline.savedPath = savePath;
     } else {
       // 没有记录的存储路径，使用当前路径和文件名
+      // 假设 currentPath.value 中的路径分隔符是一致的
+      const pathSeparator = currentPath.value.includes('/') ? '/' : '\\';
+
       savePath = currentPath.value ?
-          `${currentPath.value}/${safeFileName}` :
+          `${currentPath.value}${pathSeparator}${safeFileName}` :
           safeFileName;
 
       // 保存路径到路线对象中，方便下次使用
