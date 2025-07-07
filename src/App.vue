@@ -72,7 +72,7 @@ const selectedFiles = ref([]);
 const showFileSelectModal = ref(false);
 
 // 导出
-const exportAuthor = ref('');
+const exportAuthors = ref([{name: '', links: ''}]);
 const exportVersion = ref('1.0');
 const exportDescription = ref('');
 const showExportModal = ref(false);
@@ -258,7 +258,7 @@ function addPolyline(layer, name = "未命名路径") {
     }),
     info: { // 初始化 info 属性
       name: name,
-      author: '',
+      authors: [], // 使用新的authors数组格式
       version: '1.0',
       description: ''
     }
@@ -271,7 +271,26 @@ function addPolyline(layer, name = "未命名路径") {
 async function addImportedPolyline(importedData, filePath = null) {
   const mapName = importedData.info.map_name || 'Teyvat'; // 默认地图为 Teyvat
   if (mapName !== currentMapName.value && mapConfigs[mapName]) {
-    await switchMap(mapName); // 仅在地图不一致时切换
+    // 显示切换地图提示，减少意外的卡顿
+    const mapDisplayName = mapConfigs[mapName].displayName;
+    const currentMapDisplayName = mapConfigs[currentMapName.value].displayName;
+      try {
+      await new Promise((resolve, reject) => {
+        Modal.confirm({
+          title: '需要切换地图',
+          content: `该脚本属于 ${mapDisplayName}，当前地图为 ${currentMapDisplayName}，需要切换地图后导入。`,
+          okText: '确认切换',
+          cancelText: '取消导入',
+          onOk: () => resolve(),
+          onCancel: () => reject(new Error('用户取消导入'))
+        });
+      });
+      
+      await switchMap(mapName); // 用户确认后切换地图
+    } catch (error) {
+      console.log('用户取消导入:', error.message);
+      return; // 用户取消，直接返回
+    }
   }
   const positions = importedData.positions.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
@@ -282,6 +301,24 @@ async function addImportedPolyline(importedData, filePath = null) {
     weight: 3,
   }).addTo(map.value);
   layer.on('pm:edit', handleMapPointChange);
+
+  // 处理作者信息的兼容性
+  let processedInfo = { ...importedData.info };
+  
+  // 如果有旧格式的author字段，转换为新格式的authors数组
+  if (processedInfo.author && !processedInfo.authors) {
+    processedInfo.authors = [{
+      name: processedInfo.author,
+      links: ''
+    }];
+    // 移除旧的author字段
+   delete processedInfo.author;
+  }
+  
+  // 确保authors字段存在且为数组
+  if (!processedInfo.authors || !Array.isArray(processedInfo.authors)) {
+    processedInfo.authors = [];
+  }
 
   const newPolyline = {
     name: importedData.info.name,
@@ -298,7 +335,60 @@ async function addImportedPolyline(importedData, filePath = null) {
       type: pos.type || 'path',
       point_ext_params: pos.point_ext_params || undefined
     })),
-    info: importedData.info,
+    info: processedInfo, // 使用处理后的info
+    savedPath: filePath // 记录原始文件路径
+  };
+  polylines.value.push(newPolyline);
+  selectedPolylineIndex.value = polylines.value.length - 1;
+  selectPolyline(selectedPolylineIndex.value);
+}
+
+// 不切换地图的导入函数，用于批量导入
+function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
+  const positions = importedData.positions.map((pos) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
+  const layer = L.polyline(positions, {
+    color: 'red',
+    weight: 3,
+  }).addTo(map.value);
+  layer.on('pm:edit', handleMapPointChange);
+
+  // 处理作者信息的兼容性
+  let processedInfo = { ...importedData.info };
+  
+  // 如果有旧格式的author字段，转换为新格式的authors数组
+  if (processedInfo.author && !processedInfo.authors) {
+    processedInfo.authors = [{
+      name: processedInfo.author,
+      links: ''
+    }];
+    // 移除旧的author字段
+    delete processedInfo.author;
+  }
+  
+  // 确保authors字段存在且为数组
+  if (!processedInfo.authors || !Array.isArray(processedInfo.authors)) {
+    processedInfo.authors = [];
+  }
+
+  const newPolyline = {
+    name: importedData.info.name,
+    tags: importedData.info.tags || [],
+    enable_monster_loot_split: !!importedData.info.enable_monster_loot_split,
+    layer: layer,
+    positions: importedData.positions.map((pos, index) => ({
+      id: index + 1,
+      x: pos.x,
+      y: pos.y,
+      action: pos.action || '',
+      move_mode: pos.move_mode || 'walk',
+      action_params: pos.action_params,
+      type: pos.type || 'path',
+      point_ext_params: pos.point_ext_params || undefined
+    })),
+    info: processedInfo, // 使用处理后的info
     savedPath: filePath // 记录原始文件路径
   };
   polylines.value.push(newPolyline);
@@ -403,6 +493,7 @@ const selectedJsonFileCount = computed(() => {
   }).length;
 });
 
+
 // 修改：确认导入选中的文件
 async function confirmImportFiles() {
   try {
@@ -419,14 +510,57 @@ async function confirmImportFiles() {
       return;
     }
 
-    let successCount = 0;
-    let errorCount = 0;
-
+    // 预读取所有文件，检查是否需要切换地图
+    const fileDataList = [];
     for (const filePath of jsonFiles) {
       try {
         const content = await fileAccessBridge.ReadFile(filePath);
         const data = JSON.parse(content);
-        addImportedPolyline(data, filePath); // 传递文件路径
+        fileDataList.push({ filePath, data });
+      } catch (error) {
+        console.error(`读取文件 ${filePath} 失败:`, error);
+      }
+    }
+
+    // 检查是否有不同地图的文件
+    const mapNames = [...new Set(fileDataList.map(item => item.data.info.map_name || 'Teyvat'))];
+    const needSwitchMap = mapNames.some(mapName => mapName !== currentMapName.value);
+
+    if (needSwitchMap && mapNames.length > 1) {
+      // 多个不同地图的文件
+      Message.warning('选中的文件包含多个不同地图的脚本，请分批导入同一地图的脚本');
+      return;
+    } else if (needSwitchMap) {
+      // 单个不同地图，提示用户
+      const targetMapName = mapNames[0];
+      const mapDisplayName = mapConfigs[targetMapName]?.displayName || targetMapName;
+      const currentMapDisplayName = mapConfigs[currentMapName.value].displayName;
+        try {
+        await new Promise((resolve, reject) => {
+          Modal.confirm({
+            title: '需要切换地图',
+            content: `选中的脚本属于 ${mapDisplayName}，当前地图为 ${currentMapDisplayName}，需要切换地图后批量导入。`,
+            okText: '确认切换',
+            cancelText: '取消导入',
+            onOk: () => resolve(),
+            onCancel: () => reject(new Error('用户取消导入'))
+          });
+        });
+        
+        await switchMap(targetMapName);
+      } catch (error) {
+        console.log('用户取消批量导入');
+        return;
+      }
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // 批量导入（此时地图已经统一）
+    for (const { filePath, data } of fileDataList) {
+      try {
+        await addImportedPolylineWithoutMapSwitch(data, filePath); // 使用不切换地图的版本
         successCount++;
       } catch (error) {
         console.error(`导入文件 ${filePath} 失败:`, error);
@@ -566,13 +700,36 @@ function updatePolyline(layer) {
   }
 }
 
-let preAuthor = (loadLocal("_preAuthor") || {}).preAuthor;
+let preAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [{name: '', links: ''}];
+
+// 添加作者管理函数
+function addAuthor() {
+  exportAuthors.value.push({name: '', links: ''});
+}
+
+function removeAuthor(index) {
+  if (exportAuthors.value.length > 1) {
+    exportAuthors.value.splice(index, 1);
+  }
+}
 
 function exportPositions(index) {
   const polyline = polylines.value[index];
   // 检查 polyline.info 是否存在
   const info = polyline.info || {};
-  exportAuthor.value = info.author || preAuthor || ''; // 回填作者信息
+  
+  // 处理新旧格式兼容
+  if (info.authors && Array.isArray(info.authors)) {
+    // 使用新格式
+    exportAuthors.value = info.authors.length > 0 ? [...info.authors] : [{name: '', links: ''}];
+  } else if (info.author) {
+    // 兼容旧格式，转换为新格式
+    exportAuthors.value = [{name: info.author, links: ''}];
+  } else {
+    // 使用预设值或默认值
+    exportAuthors.value = preAuthors.length > 0 ? [...preAuthors] : [{name: '', links: ''}];
+  }
+  
   exportVersion.value = info.version || ''; // 回填版本信息
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
@@ -580,11 +737,15 @@ function exportPositions(index) {
 
 function handleExport() {
   const polyline = polylines.value[selectedPolylineIndex.value];
+  
+  // 过滤掉空的作者信息
+  const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
+  
   const data = {
     info: {
       name: polyline.name,
       type: "collect",
-      author: exportAuthor.value, // 使用用户输入的作者信息
+      authors: validAuthors, // 使用新格式
       version: exportVersion.value, // 使用用户输入的版本信息
       description: exportDescription.value, // 添加描述信息
       map_name: currentMapName.value, // 添加地图名字
@@ -596,10 +757,13 @@ function handleExport() {
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
-  if (!(polyline.info && polyline.info.author)) {
-    preAuthor = exportAuthor.value;
-    saveLocal("_preAuthor", {preAuthor})
+  
+  // 保存作者信息到本地存储（仅当不是从已有info中加载时）
+  if (!(polyline.info && (polyline.info.authors || polyline.info.author))) {
+    preAuthors = validAuthors;
+    saveLocal("_preAuthors", {preAuthors})
   }
+  
   if (mode === 'single') {
     // 使用 fileAccessBridge 保存
     saveToFileAccessBridge(data, polyline.name);
@@ -1497,18 +1661,50 @@ function formatNumber(num) {
         <a-input-number v-model="newPointY" placeholder="请输入Y坐标"/>
       </a-form-item>
     </a-form>
-  </a-modal>
-  <!-- 导出模态框 -->
+  </a-modal>  <!-- 导出模态框 -->
   <a-modal
       v-model:visible="showExportModal"
       title="导出路径"
       @ok="handleExport"
       @cancel="showExportModal = false"
+      :width="600"
   >
-    <a-form :model="{ author: exportAuthor, version: exportVersion }">
-      <a-form-item field="author" label="作者">
-        <a-input v-model="exportAuthor" placeholder="请输入作者"/>
+    <a-form :model="{ authors: exportAuthors, version: exportVersion }">      <!-- 作者信息区域 -->      <a-form-item label="作者信息" style="width: 100%;">
+        <div style="width: 100%;">
+          <template v-for="(author, index) in exportAuthors" :key="index">
+            <!-- 作者姓名行 -->
+            <div style="margin-bottom: 4px; display: flex; width: 100%; gap: 8px;">
+              <a-input 
+                v-model="author.name" 
+                :placeholder="`作者 ${index + 1} 姓名`"
+                size="small"
+                style="flex: 1;"
+              />
+              <a-button 
+                @click="removeAuthor(index)" 
+                size="small" 
+                status="danger"
+                :disabled="exportAuthors.length === 1"
+              >
+                删除
+              </a-button>
+            </div>
+            <!-- 作者链接行 -->
+            <div style="margin-bottom: 12px; width: 100%;">
+              <a-input 
+                v-model="author.links" 
+                :placeholder="`作者 ${index + 1} 链接（可选）`"
+                size="small"
+                style="width: 100%;"
+              />
+            </div>
+          </template>
+          <a-button @click="addAuthor" type="dashed" size="small" style="width: 100%;">
+            + 添加作者
+          </a-button>
+        </div>
       </a-form-item>
+      
       <a-form-item field="version" label="版本">
         <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始"/>
       </a-form-item>
