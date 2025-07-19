@@ -313,6 +313,7 @@ async function addImportedPolyline(importedData, filePath = null) {
     }];
     // 移除旧的author字段
    delete processedInfo.author;
+   delete importedData?.info?.author;
   }
   
   // 确保authors字段存在且为数组
@@ -337,6 +338,7 @@ async function addImportedPolyline(importedData, filePath = null) {
     })),
     info: processedInfo, // 使用处理后的info
     savedPath: filePath // 记录原始文件路径
+    ,oldFileData:importedData
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -366,6 +368,7 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
     }];
     // 移除旧的author字段
     delete processedInfo.author;
+    delete importedData?.info?.author;
   }
   
   // 确保authors字段存在且为数组
@@ -389,7 +392,8 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
       point_ext_params: pos.point_ext_params || undefined
     })),
     info: processedInfo, // 使用处理后的info
-    savedPath: filePath // 记录原始文件路径
+    savedPath: filePath, // 记录原始文件路径
+    oldFileData:importedData //原始文件数据，用于导出时合并
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -734,14 +738,44 @@ function exportPositions(index) {
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
 }
+function deepMerge(target, source) {
+  // 辅助函数：判断是否为纯对象（通过 {} 或 new Object 创建）
+  const isPlainObject = (obj) => {
+    return Object.prototype.toString.call(obj) === '[object Object]';
+  };
 
+  for (const key in source) {
+    if (source.hasOwnProperty(key)) {
+      const sourceValue = source[key];
+      const targetValue = target[key];
+
+      // 情况1：source属性是数组 → 直接覆盖
+      if (Array.isArray(sourceValue)) {
+        target[key] = sourceValue.slice(); // 浅拷贝数组
+      }
+      // 情况2：source属性是纯对象 → 递归合并
+      else if (isPlainObject(sourceValue)) {
+        // 确保target对应属性也是纯对象，否则创建新对象
+        if (!isPlainObject(targetValue)) {
+          target[key] = {};
+        }
+        deepMerge(target[key], sourceValue);
+      }
+      // 情况3：基本类型或内置对象 → 直接覆盖
+      else {
+        target[key] = sourceValue;
+      }
+    }
+  }
+  return target;
+}
 function handleExport() {
   const polyline = polylines.value[selectedPolylineIndex.value];
   
   // 过滤掉空的作者信息
   const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
   
-  const data = {
+  let data = {
     info: {
       name: polyline.name,
       type: "collect",
@@ -763,6 +797,8 @@ function handleExport() {
     preAuthors = validAuthors;
     saveLocal("_preAuthors", {preAuthors})
   }
+  //合并data 保留自定义属等，不能在编辑器中编辑的数据  oldFileData
+  data=deepMerge(polyline.oldFileData || {},data);
   
   if (mode === 'single') {
     // 使用 fileAccessBridge 保存
