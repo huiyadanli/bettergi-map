@@ -1361,7 +1361,7 @@ function formatNumber(num) {
                   <a-input
                       v-model="item.name"
                       @change="(value) => renamePolyline(index, value)"
-                      style="width: 150px;"
+                      style="width: 300px;"
                   />
                   <a-button @click="selectPolyline(index)" type="primary" size="small">选择</a-button>
                   <a-button @click="commonTagManagerModal(index)" type="secondary" size="small">其他设置</a-button>
