@@ -14,9 +14,9 @@ const mode = import.meta.env.VITE_MODE;
 const mapConfigs = {
   Teyvat: {
     gameMapRows: 13,
-    gameMapCols: 18,
+    gameMapCols: 22,
     gameMapUpRows: 5,
-    gameMapLeftCols: 11,
+    gameMapLeftCols: 15,
     gameMapBlockWidth: 1024,
     mapImage: './1024_map.jpg',
     displayName: '提瓦特大陆',
@@ -112,14 +112,25 @@ onMounted(() => {
 
 function loadMapImageAndInit(mapImageSrc) {
   isMapLoaded.value = false; // 地图加载开始
-  const img = new Image();
-  img.onload = function () {
-    imageWidth.value = this.width;
-    imageHeight.value = this.height;
+  
+  // 如果是Teyvat地图，直接设置固定尺寸并初始化地图
+  if (currentMapName.value === 'Teyvat') {
+    // Teyvat地图使用瓦片，根据gameMapCols和gameMapRows计算尺寸
+    imageWidth.value = currentMapConfig.value.gameMapCols * currentMapConfig.value.gameMapBlockWidth;
+    imageHeight.value = currentMapConfig.value.gameMapRows * currentMapConfig.value.gameMapBlockWidth;
     initMap();
     isMapLoaded.value = true; // 地图加载完成
-  };
-  img.src = mapImageSrc;
+  } else {
+    // 其他地图仍然使用单张图片
+    const img = new Image();
+    img.onload = function () {
+      imageWidth.value = this.width;
+      imageHeight.value = this.height;
+      initMap();
+      isMapLoaded.value = true; // 地图加载完成
+    };
+    img.src = mapImageSrc;
+  }
 }
 
 function initMap() {
@@ -137,7 +148,24 @@ function initMap() {
   });
 
   const bounds = [[0, 0], [imageHeight.value, imageWidth.value]];
-  L.imageOverlay(mapImage.value, bounds).addTo(map.value);
+  
+  // 根据地图类型选择加载方式
+  if (currentMapName.value === 'Teyvat') {
+    // 使用瓦片地图
+    const tileLayer = L.tileLayer('./teyvat_tiles/{x}_{y}.jpg', {
+      minZoom: -4,
+      maxZoom: 5,
+      minNativeZoom: 1,
+      maxNativeZoom: 1,
+      tileSize: currentMapConfig.value.gameMapBlockWidth,
+      noWrap: true,
+      bounds: bounds
+    });
+    tileLayer.addTo(map.value);
+  } else {
+    // 使用单张图片
+    L.imageOverlay(mapImage.value, bounds).addTo(map.value);
+  }
 
   map.value.fitBounds(bounds);
   map.value.setZoom(0);
