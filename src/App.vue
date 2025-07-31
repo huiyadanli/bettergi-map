@@ -14,9 +14,9 @@ const mode = import.meta.env.VITE_MODE;
 const mapConfigs = {
   Teyvat: {
     gameMapRows: 13,
-    gameMapCols: 18,
+    gameMapCols: 22,
     gameMapUpRows: 5,
-    gameMapLeftCols: 11,
+    gameMapLeftCols: 15,
     gameMapBlockWidth: 1024,
     mapImage: './1024_map.jpg',
     displayName: '提瓦特大陆',
