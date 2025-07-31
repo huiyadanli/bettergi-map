@@ -325,6 +325,7 @@ async function addImportedPolyline(importedData, filePath = null) {
     name: importedData.info.name,
     tags: importedData.info.tags || [],
     enable_monster_loot_split: !!importedData.info.enable_monster_loot_split,
+    map_match_method: importedData.info.map_match_method || '',
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -787,6 +788,7 @@ function handleExport() {
       , tags: polyline.tags || []
       , last_modified_time: Date.now() //导出时间
       , enable_monster_loot_split: !!polyline.enable_monster_loot_split //区分怪物拾取
+      , map_match_method: polyline.map_match_method || '' //地图匹配方法
 
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
@@ -1208,18 +1210,21 @@ const commonTagKey = "_commonTag";
 const otherConfig = ref({
   commonTag: []
   , enableMonsterLootSplit: false
+  , mapMatchMethod: ''
 })
 const showCommonTagManager = ref(false);
 const polylineTagsSelectIndex = ref(-1);
 const commonTagManagerModal = (index) => {
   otherConfig.value.commonTag = polylines.value[index].tags || [];
   otherConfig.value.enableMonsterLootSplit = !!polylines.value[index].enable_monster_loot_split;
+  otherConfig.value.mapMatchMethod = polylines.value[index].map_match_method || '';
   polylineTagsSelectIndex.value = index;
   showCommonTagManager.value = true;
 }
 const saveCommonTagManagerModal = () => {
   polylines.value[polylineTagsSelectIndex.value].tags = otherConfig.value.commonTag;
   polylines.value[polylineTagsSelectIndex.value].enable_monster_loot_split = otherConfig.value.enableMonsterLootSplit;
+  polylines.value[polylineTagsSelectIndex.value].map_match_method = otherConfig.value.mapMatchMethod;
 }
 const commonTagChange = () => {
   let tags = otherConfig.value.commonTag;
@@ -1658,6 +1663,19 @@ function formatNumber(num) {
           <a-form-item label="区分怪物拾取" size="mini"
                        tooltip="只有启用此配置，在调度中的只拾取精英配置才会生效，如果该脚本无精英怪，则无脑开启即可（和调度器配置同时开启后，没有标记精英的点位，将不再拾取）。">
             <a-checkbox :value="true" v-model="otherConfig.enableMonsterLootSplit"></a-checkbox>
+          </a-form-item>
+        </a-col>
+
+      </a-row>
+      <a-row :gutter="24">
+        <a-col :span="24">
+          <a-form-item label="地图匹配方法" size="mini"
+                       tooltip="选择地图匹配的方法，SIFT特征匹配适用于一般情况，TemplateMatch模板匹配支持分层地图。">
+            <a-select v-model="otherConfig.mapMatchMethod" placeholder="请选择地图匹配方法" allow-clear>
+              <a-option value=""></a-option>
+              <a-option value="SIFT">特征匹配</a-option>
+              <a-option value="TemplateMatch">模板匹配(支持分层地图)</a-option>
+            </a-select>
           </a-form-item>
         </a-col>
 
