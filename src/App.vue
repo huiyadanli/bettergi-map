@@ -110,6 +110,13 @@ onMounted(() => {
   loadMapImageAndInit(mapImage.value);
 });
 
+function JSONStringifyOrdered(obj, space)
+{
+    const allKeys = new Set();
+    JSON.stringify(obj, (key, value) => (allKeys.add(key), value));
+    return JSON.stringify(obj, Array.from(allKeys).sort(), space);
+}
+ 
 function loadMapImageAndInit(mapImageSrc) {
   isMapLoaded.value = false; // 地图加载开始
   const img = new Image();
@@ -600,7 +607,7 @@ function closeFileSelectModal() {
 async function saveToFileAccessBridge(data, fileName) {
   try {
     const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
-    const json = JSON.stringify(data, null, 2);
+    const json = JSONStringifyOrdered(data, 2);
     const safeFileName = fileName.replace(/[<>:"/\\|?*]/g, '_') + '.json';
 
     // 首先检查是否存在原始存储路径
@@ -807,7 +814,7 @@ function handleExport() {
     saveToFileAccessBridge(data, polyline.name);
   } else {
     // 保持原有逻辑
-    const json = JSON.stringify(data, null, 2);
+    const json = JSONStringifyOrdered(data, 2);
     const blob = new Blob([json], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
