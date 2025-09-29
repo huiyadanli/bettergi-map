@@ -481,6 +481,19 @@ function resetToRoot() {
   importFromFileAccessBridge();
 }
 
+// 新增：全选
+async function selectAll() {
+  console.log(availableFiles.value, selectedFiles.value)
+  if (availableFiles.value.length == selectedFiles.value.length) {
+    // 已经全选，取消
+    console.log("取消全选")
+    selectedFiles.value = [];
+  } else {
+    console.log("全选")
+    selectedFiles.value = availableFiles.value.map(item => item.RelativePath);
+  }
+}
+
 // 新增：获取文件图标
 function getFileIcon(item) {
   if (item.IsDirectory) {
@@ -1799,6 +1812,10 @@ function formatNumber(num) {
           <span style="color: #666;">
             当前路径: {{ currentPath || '根目录' }}
           </span>
+          <a-button size="small" @click="selectAll">
+            <template #icon>☑️</template>
+            全选
+          </a-button>
         </a-space>
       </div>
 
