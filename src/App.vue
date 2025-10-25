@@ -246,23 +246,67 @@ function handleMapPointChange(e) {
   updatePolyline(e.target);
 }
 
-// 保持原有的 addPolyline 函数不变
+// 添加点位，支持插入到锁定行位置
 function addPolyline(layer, name = "未命名路径") {
+  const newPositions = layer.getLatLngs().map((latlng, index) => {
+    const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
+    return {
+      id: index + 1,
+      action: "",
+      move_mode: "walk",
+      type: index === 0 ? "teleport" : "path",
+      x: gamePos.x,
+      y: gamePos.y,
+      action_params: ""
+    };
+  });
+
+  // 检查当前选中的路线是否有锁定行
+  if (selectedPolylineIndex.value >= 0 && selectedPolylineIndex.value < polylines.value.length) {
+    const currentPolyline = polylines.value[selectedPolylineIndex.value];
+    const lockedIndex = currentPolyline.positions.findIndex(item => item.locked);
+    
+    if (lockedIndex > -1) {
+      // 有锁定行，插入到锁定位置
+      const insertPositions = newPositions.map((pos, index) => ({
+        ...pos,
+        id: lockedIndex + index + 1
+      }));
+      
+      // 插入新点位到锁定位置
+      currentPolyline.positions.splice(lockedIndex, 0, ...insertPositions);
+      
+      // 更新后续点位的ID
+      currentPolyline.positions.forEach((pos, index) => {
+        pos.id = index + 1;
+      });
+      
+      // 更新地图上的折线
+      updateMapFromPolyLine(currentPolyline);
+      
+      // 解锁所有行
+      currentPolyline.positions.forEach(item => {
+        item.locked = false;
+      });
+      
+      map.value.removeLayer(layer);
+      
+      return; // 插入完成，不创建新路线
+    }
+  }
+
+  // 没有锁定行或没有选中路线，创建新路线
+  // 清空选中态和选中点
+  selectedPointIndex.value = -1;
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
+  
   const newPolyline = {
     name: name,
     layer: layer,
-    positions: layer.getLatLngs().map((latlng, index) => {
-      const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
-      return {
-        id: index + 1,
-        action: "",
-        move_mode: "walk",
-        type: index === 0 ? "teleport" : "path",
-        x: gamePos.x,
-        y: gamePos.y,
-        action_params: ""
-      };
-    }),
+    positions: newPositions,
     info: { // 初始化 info 属性
       name: name,
       authors: [], // 使用新的authors数组格式
@@ -409,7 +453,7 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
 }
 
 
-// 新增：通过 fileAccessBridge 导入路线
+// 通过 fileAccessBridge 导入路线
 async function importFromFileAccessBridge() {
   try {
     const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
@@ -432,14 +476,14 @@ async function importFromFileAccessBridge() {
   }
 }
 
-// 修改：显示文件选择对话框
+// 显示文件选择对话框
 function showFileSelectDialog(items) {
   availableFiles.value = Array.isArray(items) ? items : [];
   selectedFiles.value = [];
   showFileSelectModal.value = true;
 }
 
-// 新增：进入目录
+// 进入目录
 async function enterDirectory(dirPath) {
   try {
     const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
@@ -457,7 +501,7 @@ async function enterDirectory(dirPath) {
   }
 }
 
-// 新增：返回上级目录
+// 返回上级目录
 async function goBack() {
   if (pathHistory.value.length > 0) {
     currentPath.value = pathHistory.value.pop();
@@ -474,17 +518,17 @@ async function goBack() {
   }
 }
 
-// 新增：重置到根目录
+// 重置到根目录
 function resetToRoot() {
   currentPath.value = '';
   pathHistory.value = [];
   importFromFileAccessBridge();
 }
 
-// 新增：全选
+// 全选
 async function selectAll() {
   console.log(availableFiles.value, selectedFiles.value)
-  if (availableFiles.value.length == selectedFiles.value.length) {
+  if (availableFiles.value.length === selectedFiles.value.length) {
     // 已经全选，取消
     console.log("取消全选")
     selectedFiles.value = [];
@@ -494,7 +538,7 @@ async function selectAll() {
   }
 }
 
-// 新增：获取文件图标
+// 获取文件图标
 function getFileIcon(item) {
   if (item.IsDirectory) {
     return '📁';
@@ -505,12 +549,12 @@ function getFileIcon(item) {
   }
 }
 
-// 新增：检查是否为JSON文件
+// 检查是否为JSON文件
 function isJsonFile(item) {
   return !item.IsDirectory && item.Name.endsWith('.json');
 }
 
-// 新增：获取选中的JSON文件数量
+// 获取选中的JSON文件数量
 const selectedJsonFileCount = computed(() => {
   return selectedFiles.value.filter(filePath => {
     const item = availableFiles.value.find(item => item.RelativePath === filePath);
@@ -518,8 +562,14 @@ const selectedJsonFileCount = computed(() => {
   }).length;
 });
 
+// 判断是否全选状态
+const isAllSelected = computed(() => {
+  const jsonFiles = availableFiles.value.filter(item => isJsonFile(item));
+  return jsonFiles.length > 0 && selectedJsonFileCount.value === jsonFiles.length;
+});
 
-// 修改：确认导入选中的文件
+
+// 确认导入选中的文件
 async function confirmImportFiles() {
   try {
     const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
@@ -608,7 +658,7 @@ async function confirmImportFiles() {
   }
 }
 
-// 新增：关闭文件选择对话框时重置状态
+// 关闭文件选择对话框时重置状态
 function closeFileSelectModal() {
   showFileSelectModal.value = false;
   currentPath.value = '';
@@ -616,7 +666,7 @@ function closeFileSelectModal() {
   selectedFiles.value = [];
 }
 
-// 新增：通过 fileAccessBridge 保存路线
+// 通过 fileAccessBridge 保存路线
 async function saveToFileAccessBridge(data, fileName) {
   try {
     const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
@@ -665,7 +715,7 @@ async function saveToFileAccessBridge(data, fileName) {
   }
 }
 
-// 修改 importPositions 函数，支持 fileAccessBridge
+// 支持 fileAccessBridge
 function importPositions() {
   if (mode === 'single') {
     // 使用 fileAccessBridge 导入
@@ -690,7 +740,7 @@ function importPositions() {
   }
 }
 
-// 添加重命名函数
+// 重命名函数
 function renamePolyline(index, newName) {
   polylines.value[index].name = newName;
 }
@@ -713,12 +763,27 @@ function updatePolyline(layer) {
       const updatedPositions = newLatLngs.map((latlng, idx) => {
         const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
         const existingPosition = currentPositions.find(pos => pos.x === gamePos.x && pos.y === gamePos.y);
-        return {
-          ...existingPosition, // 保留原有数据
-          id: idx + 1,
-          x: gamePos.x,
-          y: gamePos.y
-        };
+        
+        // 如果找到匹配的原有点位，保留其所有属性
+        if (existingPosition) {
+          return {
+            ...existingPosition, // 保留原有数据
+            id: idx + 1,
+            x: gamePos.x,
+            y: gamePos.y
+          };
+        } else {
+          // 新添加的点位，使用默认属性
+          return {
+            id: idx + 1,
+            x: gamePos.x,
+            y: gamePos.y,
+            action: "",
+            move_mode: "walk",
+            type: idx === 0 ? "teleport" : "path",
+            action_params: ""
+          };
+        }
       });
       polylines.value[index].positions = updatedPositions;
     }
@@ -727,7 +792,7 @@ function updatePolyline(layer) {
 
 let preAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [{name: '', links: ''}];
 
-// 添加作者管理函数
+// 作者管理函数
 function addAuthor() {
   exportAuthors.value.push({name: '', links: ''});
 }
@@ -744,18 +809,19 @@ function exportPositions(index) {
   const info = polyline.info || {};
   
   // 处理新旧格式兼容
-  if (info.authors && Array.isArray(info.authors)) {
+  if (info.authors && Array.isArray(info.authors) && info.authors.length > 0) {
     // 使用新格式
-    exportAuthors.value = info.authors.length > 0 ? [...info.authors] : [{name: '', links: ''}];
-  } else if (info.author) {
+    exportAuthors.value = [...info.authors];
+  } else if (info.author && info.author.trim() !== '') {
     // 兼容旧格式，转换为新格式
     exportAuthors.value = [{name: info.author, links: ''}];
   } else {
-    // 使用预设值或默认值
-    exportAuthors.value = preAuthors.length > 0 ? [...preAuthors] : [{name: '', links: ''}];
+    // 路线没有作者信息，使用空数组
+    exportAuthors.value = [{name: '', links: ''}];
   }
   
-  exportVersion.value = info.version || ''; // 回填版本信息
+  exportVersion.value = info.version || '';
+  exportDescription.value = info.description || '';
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
 }
@@ -793,8 +859,38 @@ function deepMerge(target, source) {
 function handleExport() {
   const polyline = polylines.value[selectedPolylineIndex.value];
   
+  // 检查路线是否已有作者
+  const info = polyline.info || {};
+  const hasRouteAuthors = info.authors && Array.isArray(info.authors) && info.authors.length > 0 && info.authors.some(author => author.name.trim() !== '');
+  
+  // 如果路线没有作者信息，且当前输入框也为空，使用预设作者
+  if (!hasRouteAuthors) {
+    const inputHasAuthor = exportAuthors.value.some(author => author.name.trim() !== '');
+    if (!inputHasAuthor) {
+      // 从localStorage获取最新的预设作者
+      const storedPreAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [];
+      if (storedPreAuthors.length > 0) {
+        // 应用预设作者
+        exportAuthors.value = storedPreAuthors.map(author => ({...author}));
+        const authorsList = storedPreAuthors.map(author => author.name).join('、');
+        Message.info(`当前作者信息为空，使用预设作者：${authorsList}`);
+      }
+    }
+  }
+  
   // 过滤掉空的作者信息
   const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
+  
+  // 保存当前填写的作者为预设
+  if (validAuthors.length > 0) {
+    const preAuthorsString = JSON.stringify(preAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
+    const validAuthorsString = JSON.stringify(validAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
+    
+    if (preAuthorsString !== validAuthorsString) {
+      preAuthors = validAuthors;
+      saveLocal("_preAuthors", {preAuthors});
+    }
+  }
   
   let data = {
     info: {
@@ -813,14 +909,16 @@ function handleExport() {
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
-  
-  // 保存作者信息到本地存储（仅当不是从已有info中加载时）
-  if (!(polyline.info && (polyline.info.authors || polyline.info.author))) {
-    preAuthors = validAuthors;
-    saveLocal("_preAuthors", {preAuthors})
-  }
   //合并data 保留自定义属等，不能在编辑器中编辑的数据  oldFileData
   data=deepMerge(polyline.oldFileData || {},data);
+  
+  // 更新当前路径的info信息，保持数据同步
+  if (!polyline.info) {
+    polyline.info = {};
+  }
+  polyline.info.version = exportVersion.value;
+  polyline.info.description = exportDescription.value;
+  polyline.info.authors = validAuthors;
   
   if (mode === 'single') {
     // 使用 fileAccessBridge 保存
@@ -854,7 +952,7 @@ function selectPolyline(index) {
 function deletePolyline(index) {
   Modal.confirm({
     title: '确认删除',
-    content: '确定要删除该路线吗？此操作不可撤销。',
+    content: '确定要删除该路线吗？此操作不可撤销。（仅删除当前页面显示，已存在的本地文件不会被删除）',
     okText: '删除',
     okButtonProps: {status: 'danger'},
     cancelText: '取消',
@@ -883,28 +981,7 @@ function updatePosition(polylineIndex, positionIndex, key, value) {
   updateMapFromTable(polylineIndex, positionIndex);
 }
 
-// 添加动作选项
-const actionOptions = [
-  {label: '无', value: ''},
-  {label: '战斗', value: 'fight'},
-  {label: '简易策略脚本', value: 'combat_script'},
-  {label: '纳西妲长E收集', value: 'nahida_collect'},
-  {label: '下落攻击', value: 'stop_flying'},
-  {label: '强制传送', value: 'force_tp'},
-  {label: '四叶印', value: 'up_down_grab_leaf'},
-  {label: '挖矿', value: 'mining'},
-  {label: '钓鱼', value: 'fishing'},
-  {label: '设置时间', value: 'set_time'},
-  {label: '在附近拾取', value: 'pick_around'},
-  {label: '水元素力采集', value: 'hydro_collect'},
-  {label: '雷元素力采集', value: 'electro_collect'},
-  {label: '风元素力采集', value: 'anemo_collect'},
-  {label: '火元素力采集', value: 'pyro_collect'},
-  {label: '输出日志', value: 'log_output'},
-  {label: '退出重新登录', value: 'exit_and_relogin'},
-];
-
-
+// 动作选项
 const actionOptionsTree = [
   {label: '无', value: ''},
   {label: '战斗', value: 'fight'},
@@ -915,7 +992,7 @@ const actionOptionsTree = [
   {label: '四叶印', value: 'up_down_grab_leaf'},
   {label: '挖矿', value: 'mining'},
   {label: '钓鱼', value: 'fishing'},
-
+  {label: '聚集材料', value: 'pick_up_collect'},
   {label: '在附近拾取', value: 'pick_around'},
   {
     label: '元素力采集',
@@ -941,6 +1018,13 @@ const actionOptionsTree = [
 function handleChange(newData) {
   const polyline = polylines.value[selectedPolylineIndex.value];
 
+  // 保存当前选中的点位坐标信息（如果有）
+  let selectedPoint = null;
+  if (selectedPointIndex.value >= 0 && selectedPointIndex.value < polyline.positions.length) {
+    const oldRecord = polyline.positions[selectedPointIndex.value];
+    selectedPoint = { x: oldRecord.x, y: oldRecord.y };
+  }
+
   // 更新位置数据
   polyline.positions = newData.map((item, index) => ({
     ...item,
@@ -953,6 +1037,20 @@ function handleChange(newData) {
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   polyline.layer.setLatLngs(latlngs);
+
+  // 如果之前有选中的点位，在新数据中通过坐标重新找到它并重新应用选中状态
+  if (selectedPoint) {
+    const newIndex = polyline.positions.findIndex(pos => pos.x === selectedPoint.x && pos.y === selectedPoint.y);
+    if (newIndex !== -1) {
+      selectedPointIndex.value = newIndex;
+      const newRecord = polyline.positions[newIndex];
+      // 重新应用选中效果（更新高亮标记）
+      selectPoint(newRecord);
+    } else {
+      // 如果找不到对应的点位，清除选中状态
+      selectedPointIndex.value = -1;
+    }
+  }
 }
 
 function moreSelect(v) {
@@ -962,6 +1060,10 @@ function moreSelect(v) {
 function copyPosition(record, rowIndex) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(rowIndex, 0, Object.assign({}, record, {locked: false}));
+  // 更新选中点位索引，因为插入了新点位，原来的索引需要+1
+  if (selectedPointIndex.value >= rowIndex) {
+    selectedPointIndex.value += 1;
+  }
   updateMapFromPolyLine(polyline);
 }
 
@@ -977,19 +1079,41 @@ function unlockRowIndex(record, rowIndex) {
 }
 
 const setPositionRowClass = (record, rowIndex) => {
-
+  let classes = [];
+  
+  // 如果是锁定的行，添加锁定样式
   if (record.locked) {
-    return "locked";
+    classes.push("locked");
   }
-  return "";
+  
+  // 如果是选中的行，添加选中样式
+  if (rowIndex === selectedPointIndex.value) {
+    classes.push("selected-row");
+  }
+  
+  return classes.join(" ");
 }
 
-// 添加删除点位的函数
+// 删除点位
 function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(index, 1);
+  
+  // 更新选中点位索引
+  if (selectedPointIndex.value === index) {
+    // 如果删除的是当前选中的点位，清除选中状态
+    selectedPointIndex.value = -1;
+    // 清除高亮标记
+    if (highlightMarker.value) {
+      map.value.removeLayer(highlightMarker.value);
+      highlightMarker.value = null;
+    }
+  } else if (selectedPointIndex.value > index) {
+    // 如果删除的点位在当前选中点位之前，索引需要-1
+    selectedPointIndex.value -= 1;
+  }
+  
   updateMapFromPolyLine(polyline);
-
 }
 
 // 更新地图上的折线
@@ -1060,6 +1184,10 @@ function addNewPoint(x, y) {
     let lockedIndex = polyline.positions.findIndex(item => item.locked);
     if (lockedIndex > -1) {
       polyline.positions.splice(lockedIndex, 0, newPoint);
+      // 更新选中点位索引，因为插入了新点位，原来的索引需要+1
+      if (selectedPointIndex.value >= lockedIndex) {
+        selectedPointIndex.value += 1;
+      }
     } else {
       polyline.positions.push(newPoint);
     }
@@ -1083,12 +1211,18 @@ function handleAddPointFromModal() {
   showAddPointModal.value = false;
 }
 
-function selectPoint(record, rowIndex) {
+function selectPoint(record) {
   // 清除之前的高亮标记
   if (highlightMarker.value) {
     map.value.removeLayer(highlightMarker.value);
     highlightMarker.value = null;
   }
+
+  // 更新 selectedPointIndex - 从 positions 数组中找到对应的索引
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  const actualIndex = polyline.positions.findIndex(pos => pos === record);
+  
+  selectedPointIndex.value = actualIndex;
 
   // 高亮选中的点
   const main1024Pos = coordinateConverter.value.gameToMain1024(record.x, record.y);
@@ -1103,10 +1237,19 @@ function selectPoint(record, rowIndex) {
     })
   }).addTo(map.value);
 
-  selectedPointIndex.value = rowIndex;
-
   // 将地图视图居中到选中的点
   map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
+}
+
+function clearSelection() {
+  // 清除高亮标记
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
+  
+  // 清除选中状态
+  selectedPointIndex.value = -1;
 }
 
 
@@ -1337,14 +1480,14 @@ const editPointModal = (record, rowIndex) => {
   curUpdatePosition.value = record;
   curUpdatrowIndex.value = rowIndex;
   showEditPointModal.value = true;
-  selectPoint(record, rowIndex);
+  selectPoint(record);
 };
 const updatePointModal = () => {
   curUpdatePosition.value.x = newPointX.value;
   curUpdatePosition.value.y = newPointY.value;
   showEditPointModal.value = false;
   updateMapFromTable(selectedPolylineIndex.value, curUpdatrowIndex.value);
-  selectPoint(curUpdatePosition.value, curUpdatrowIndex.value);
+  selectPoint(curUpdatePosition.value);
 };
 
 function formatNumber(num) {
@@ -1502,7 +1645,8 @@ function formatNumber(num) {
           </a-table>
 
           <template #extra>
-            <a-button @click="clearPoints" type="primary" size="small">清空</a-button>
+            <a-button @click="clearSelection" :disabled="selectedPointIndex === -1" type="primary" size="small">取消选中</a-button>
+            <a-button @click="clearPoints" type="primary" style="margin-left: 20px;" size="small">清空</a-button>
             <a-popconfirm content="是否确认合并！" @ok="mergedPolyline" okText="确认" cancelText="关闭">
               <a-button type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并
               </a-button>
@@ -1664,7 +1808,7 @@ function formatNumber(num) {
       title="其他设置"
       @ok="saveCommonTagManagerModal"
       @cancel="showCommonTagManager = false"
-      width="50%" height="50%"
+      width="600" height="50%"
       okText="保存"
       cancelText="关闭"
   >
@@ -1743,33 +1887,35 @@ function formatNumber(num) {
       @cancel="showExportModal = false"
       :width="600"
   >
-    <a-form :model="{ authors: exportAuthors, version: exportVersion }">      <!-- 作者信息区域 -->      <a-form-item label="作者信息" style="width: 100%;">
+    <a-form :model="{ authors: exportAuthors, version: exportVersion }">
+      <!-- 作者信息区域 -->
+      <a-form-item label="作者信息" style="width: 100%;">
         <div style="width: 100%;">
           <template v-for="(author, index) in exportAuthors" :key="index">
             <!-- 作者姓名行 -->
             <div style="margin-bottom: 4px; display: flex; width: 100%; gap: 8px;">
-              <a-input 
-                v-model="author.name" 
-                :placeholder="`作者 ${index + 1} 姓名`"
-                size="small"
-                style="flex: 1;"
+              <a-input
+                  v-model="author.name"
+                  :placeholder="`作者 ${index + 1} 姓名`"
+                  size="small"
+                  style="flex: 1;"
               />
-              <a-button 
-                @click="removeAuthor(index)" 
-                size="small" 
-                status="danger"
-                :disabled="exportAuthors.length === 1"
+              <a-button
+                  @click="removeAuthor(index)"
+                  size="small"
+                  status="danger"
+                  :disabled="exportAuthors.length === 1"
               >
                 删除
               </a-button>
             </div>
             <!-- 作者链接行 -->
             <div style="margin-bottom: 12px; width: 100%;">
-              <a-input 
-                v-model="author.links" 
-                :placeholder="`作者 ${index + 1} 链接（可选）`"
-                size="small"
-                style="width: 100%;"
+              <a-input
+                  v-model="author.links"
+                  :placeholder="`作者 ${index + 1} 链接（可选）`"
+                  size="small"
+                  style="width: 100%;"
               />
             </div>
           </template>
@@ -1778,7 +1924,7 @@ function formatNumber(num) {
           </a-button>
         </div>
       </a-form-item>
-      
+
       <a-form-item field="version" label="版本">
         <a-input v-model="exportVersion" placeholder="请输入版本号,从1.0开始"/>
       </a-form-item>
@@ -1812,9 +1958,15 @@ function formatNumber(num) {
           <span style="color: #666;">
             当前路径: {{ currentPath || '根目录' }}
           </span>
-          <a-button size="small" @click="selectAll">
-            <template #icon>☑️</template>
-            全选
+          <a-button 
+            size="small" 
+            @click="selectAll"
+          >
+            <template #icon>
+              <span v-if="isAllSelected">☑️</span>
+              <span v-else>☐</span>
+            </template>
+            {{ isAllSelected ? '取消全选' : '全选' }}
           </a-button>
         </a-space>
       </div>
@@ -1922,8 +2074,19 @@ const columns = [
 :deep(.arco-table-tr.locked td) {
   border-top: 2px red solid;
 }
-</style>
-<style>
+
+:deep(.arco-table-tr.selected-row td) {
+  background-color: #e4edff;
+}
+
+:deep(.arco-table-hover:not(.arco-table-dragging) .arco-table-tr:not(.arco-table-tr-empty):not(.arco-table-tr-summary):hover .arco-table-td) {
+  background-color: #e4edff !important;
+}
+
+:deep(.arco-table-tr) {
+  cursor: pointer;
+}
+
 .layout {
   height: 100vh;
 }
