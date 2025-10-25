@@ -296,6 +296,13 @@ function addPolyline(layer, name = "未命名路径") {
   }
 
   // 没有锁定行或没有选中路线，创建新路线
+  // 清空选中态和选中点
+  selectedPointIndex.value = -1;
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
+  
   const newPolyline = {
     name: name,
     layer: layer,
@@ -802,19 +809,19 @@ function exportPositions(index) {
   const info = polyline.info || {};
   
   // 处理新旧格式兼容
-  if (info.authors && Array.isArray(info.authors)) {
+  if (info.authors && Array.isArray(info.authors) && info.authors.length > 0) {
     // 使用新格式
-    exportAuthors.value = info.authors.length > 0 ? [...info.authors] : [{name: '', links: ''}];
-  } else if (info.author) {
+    exportAuthors.value = [...info.authors];
+  } else if (info.author && info.author.trim() !== '') {
     // 兼容旧格式，转换为新格式
     exportAuthors.value = [{name: info.author, links: ''}];
   } else {
-    // 使用预设值或默认值
-    exportAuthors.value = preAuthors.length > 0 ? [...preAuthors] : [{name: '', links: ''}];
+    // 路线没有作者信息，使用空数组
+    exportAuthors.value = [{name: '', links: ''}];
   }
   
-  exportVersion.value = info.version || ''; // 回填版本信息
-  exportDescription.value = info.description || ''; // 回填描述信息
+  exportVersion.value = info.version || '';
+  exportDescription.value = info.description || '';
   showExportModal.value = true;
   selectedPolylineIndex.value = index;
 }
@@ -852,8 +859,38 @@ function deepMerge(target, source) {
 function handleExport() {
   const polyline = polylines.value[selectedPolylineIndex.value];
   
+  // 检查路线是否已有作者
+  const info = polyline.info || {};
+  const hasRouteAuthors = info.authors && Array.isArray(info.authors) && info.authors.length > 0 && info.authors.some(author => author.name.trim() !== '');
+  
+  // 如果路线没有作者信息，且当前输入框也为空，使用预设作者
+  if (!hasRouteAuthors) {
+    const inputHasAuthor = exportAuthors.value.some(author => author.name.trim() !== '');
+    if (!inputHasAuthor) {
+      // 从localStorage获取最新的预设作者
+      const storedPreAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [];
+      if (storedPreAuthors.length > 0) {
+        // 应用预设作者
+        exportAuthors.value = storedPreAuthors.map(author => ({...author}));
+        const authorsList = storedPreAuthors.map(author => author.name).join('、');
+        Message.info(`当前作者信息为空，使用预设作者：${authorsList}`);
+      }
+    }
+  }
+  
   // 过滤掉空的作者信息
   const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
+  
+  // 保存当前填写的作者为预设
+  if (validAuthors.length > 0) {
+    const preAuthorsString = JSON.stringify(preAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
+    const validAuthorsString = JSON.stringify(validAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
+    
+    if (preAuthorsString !== validAuthorsString) {
+      preAuthors = validAuthors;
+      saveLocal("_preAuthors", {preAuthors});
+    }
+  }
   
   let data = {
     info: {
@@ -872,12 +909,6 @@ function handleExport() {
     },
     positions: polyline.positions // 已经是游戏坐标，无需转换
   };
-  
-  // 保存作者信息到本地存储（仅当路线没有作者信息时）
-  if (!(polyline.info.authors.length > 0 && polyline.info.authors.some(author => author.name.trim() !== ''))) {
-    preAuthors = validAuthors;
-    saveLocal("_preAuthors", {preAuthors})
-  }
   //合并data 保留自定义属等，不能在编辑器中编辑的数据  oldFileData
   data=deepMerge(polyline.oldFileData || {},data);
   
@@ -987,6 +1018,13 @@ const actionOptionsTree = [
 function handleChange(newData) {
   const polyline = polylines.value[selectedPolylineIndex.value];
 
+  // 保存当前选中的点位坐标信息（如果有）
+  let selectedPoint = null;
+  if (selectedPointIndex.value >= 0 && selectedPointIndex.value < polyline.positions.length) {
+    const oldRecord = polyline.positions[selectedPointIndex.value];
+    selectedPoint = { x: oldRecord.x, y: oldRecord.y };
+  }
+
   // 更新位置数据
   polyline.positions = newData.map((item, index) => ({
     ...item,
@@ -999,6 +1037,20 @@ function handleChange(newData) {
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   polyline.layer.setLatLngs(latlngs);
+
+  // 如果之前有选中的点位，在新数据中通过坐标重新找到它并重新应用选中状态
+  if (selectedPoint) {
+    const newIndex = polyline.positions.findIndex(pos => pos.x === selectedPoint.x && pos.y === selectedPoint.y);
+    if (newIndex !== -1) {
+      selectedPointIndex.value = newIndex;
+      const newRecord = polyline.positions[newIndex];
+      // 重新应用选中效果（更新高亮标记）
+      selectPoint(newRecord);
+    } else {
+      // 如果找不到对应的点位，清除选中状态
+      selectedPointIndex.value = -1;
+    }
+  }
 }
 
 function moreSelect(v) {
@@ -1008,6 +1060,10 @@ function moreSelect(v) {
 function copyPosition(record, rowIndex) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(rowIndex, 0, Object.assign({}, record, {locked: false}));
+  // 更新选中点位索引，因为插入了新点位，原来的索引需要+1
+  if (selectedPointIndex.value >= rowIndex) {
+    selectedPointIndex.value += 1;
+  }
   updateMapFromPolyLine(polyline);
 }
 
@@ -1042,8 +1098,22 @@ const setPositionRowClass = (record, rowIndex) => {
 function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   polyline.positions.splice(index, 1);
+  
+  // 更新选中点位索引
+  if (selectedPointIndex.value === index) {
+    // 如果删除的是当前选中的点位，清除选中状态
+    selectedPointIndex.value = -1;
+    // 清除高亮标记
+    if (highlightMarker.value) {
+      map.value.removeLayer(highlightMarker.value);
+      highlightMarker.value = null;
+    }
+  } else if (selectedPointIndex.value > index) {
+    // 如果删除的点位在当前选中点位之前，索引需要-1
+    selectedPointIndex.value -= 1;
+  }
+  
   updateMapFromPolyLine(polyline);
-
 }
 
 // 更新地图上的折线
@@ -1114,6 +1184,10 @@ function addNewPoint(x, y) {
     let lockedIndex = polyline.positions.findIndex(item => item.locked);
     if (lockedIndex > -1) {
       polyline.positions.splice(lockedIndex, 0, newPoint);
+      // 更新选中点位索引，因为插入了新点位，原来的索引需要+1
+      if (selectedPointIndex.value >= lockedIndex) {
+        selectedPointIndex.value += 1;
+      }
     } else {
       polyline.positions.push(newPoint);
     }
@@ -1165,6 +1239,17 @@ function selectPoint(record) {
 
   // 将地图视图居中到选中的点
   map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
+}
+
+function clearSelection() {
+  // 清除高亮标记
+  if (highlightMarker.value) {
+    map.value.removeLayer(highlightMarker.value);
+    highlightMarker.value = null;
+  }
+  
+  // 清除选中状态
+  selectedPointIndex.value = -1;
 }
 
 
@@ -1560,7 +1645,8 @@ function formatNumber(num) {
           </a-table>
 
           <template #extra>
-            <a-button @click="clearPoints" type="primary" size="small">清空</a-button>
+            <a-button @click="clearSelection" :disabled="selectedPointIndex === -1" type="primary" size="small">取消选中</a-button>
+            <a-button @click="clearPoints" type="primary" style="margin-left: 20px;" size="small">清空</a-button>
             <a-popconfirm content="是否确认合并！" @ok="mergedPolyline" okText="确认" cancelText="关闭">
               <a-button type="primary" style="margin-left: 20px;" size="small" v-if="polylines.length > 1">合并
               </a-button>
@@ -1990,11 +2076,15 @@ const columns = [
 }
 
 :deep(.arco-table-tr.selected-row td) {
-  background-color: #f0f5ff;
+  background-color: #e4edff;
 }
 
 :deep(.arco-table-hover:not(.arco-table-dragging) .arco-table-tr:not(.arco-table-tr-empty):not(.arco-table-tr-summary):hover .arco-table-td) {
-  background-color: #f0f5ff !important;
+  background-color: #e4edff !important;
+}
+
+:deep(.arco-table-tr) {
+  cursor: pointer;
 }
 
 .layout {
