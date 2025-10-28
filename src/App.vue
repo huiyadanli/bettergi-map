@@ -988,12 +988,12 @@ const actionOptionsTree = [
   {label: '简易策略脚本', value: 'combat_script'},
   {label: '纳西妲长E收集', value: 'nahida_collect'},
   {label: '下落攻击', value: 'stop_flying'},
-  {label: '强制传送', value: 'force_tp'},
   {label: '四叶印', value: 'up_down_grab_leaf'},
   {label: '挖矿', value: 'mining'},
   {label: '钓鱼', value: 'fishing'},
   {label: '聚集材料', value: 'pick_up_collect'},
   {label: '在附近拾取', value: 'pick_around'},
+  {label: '使用小道具', value: 'use_gadget'},
   {
     label: '元素力采集',
     value: 'element',
@@ -1008,6 +1008,7 @@ const actionOptionsTree = [
     label: '其他',
     value: 'system',
     children: [
+      {label: '强制传送', value: 'force_tp'},
       {label: '输出日志', value: 'log_output'},
       {label: '退出重新登录', value: 'exit_and_relogin'},
       {label: '设置时间', value: 'set_time'},
