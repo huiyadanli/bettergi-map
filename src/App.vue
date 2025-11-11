@@ -882,16 +882,27 @@ function handleExport() {
   const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
   
   // 保存当前填写的作者为预设
-  if (validAuthors.length > 0) {
-    const preAuthorsString = JSON.stringify(preAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
-    const validAuthorsString = JSON.stringify(validAuthors.map(a => ({name: a.name.trim(), links: a.links.trim()})).sort((a,b) => a.name.localeCompare(b.name)));
-    
+  if (validAuthors && validAuthors.length > 0) {
+    const preAuthorsString = JSON.stringify(
+        (preAuthors || []).map(a => ({
+          name: a.name ? a.name.trim() : '',
+          links: a.links ? a.links.trim() : ''
+        })).sort((a, b) => a.name.localeCompare(b.name))
+    );
+
+    const validAuthorsString = JSON.stringify(
+        validAuthors.map(a => ({
+          name: a.name ? a.name.trim() : '',
+          links: a.links ? a.links.trim() : ''
+        })).sort((a, b) => a.name.localeCompare(b.name))
+    );
+
     if (preAuthorsString !== validAuthorsString) {
       preAuthors = validAuthors;
-      saveLocal("_preAuthors", {preAuthors});
+      saveLocal("_preAuthors", { preAuthors });
     }
   }
-  
+
   let data = {
     info: {
       name: polyline.name,
