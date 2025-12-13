@@ -45,7 +45,7 @@ const mapConfigs = {
     gameMapUpRows: 2,
     gameMapLeftCols: 5,
     gameMapBlockWidth: 1024,
-    mapImage: './SeaOfBygoneEras_0_1024.png',
+    mapImage: './seaofbygoneeras_1024_map.jpg',
     displayName: '旧日之海',
   },
 };
