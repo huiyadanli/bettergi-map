@@ -39,6 +39,15 @@ const mapConfigs = {
     mapImage: './enkanomiya_1024_map.jpg',
     displayName: '渊下宫',
   },
+  SeaOfBygoneEras: {
+    gameMapRows: 3,
+    gameMapCols: 4,
+    gameMapUpRows: 2,
+    gameMapLeftCols: 5,
+    gameMapBlockWidth: 1024,
+    mapImage: './seaofbygoneeras_1024_map.jpg',
+    displayName: '旧日之海',
+  },
 };
 
 // 当前地图相关变量
