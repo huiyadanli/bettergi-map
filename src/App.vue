@@ -48,6 +48,15 @@ const mapConfigs = {
     mapImage: './seaofbygoneeras_1024_map.jpg',
     displayName: '旧日之海',
   },
+  AncientSacredMountain: {
+    gameMapRows: 4,
+    gameMapCols: 4,
+    gameMapUpRows: 1,
+    gameMapLeftCols: 1,
+    gameMapBlockWidth: 1024,
+    mapImage: "./ancientsacredmountain_1024.jpg",
+    displayName: "远古圣山",
+  },
 };
 
 // 当前地图相关变量
