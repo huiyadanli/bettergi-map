@@ -13,9 +13,9 @@ const mode = import.meta.env.VITE_MODE;
 // 地图配置
 const mapConfigs = {
   Teyvat: {
-    gameMapRows: 13,
+    gameMapRows: 15,
     gameMapCols: 22,
-    gameMapUpRows: 5,
+    gameMapUpRows: 7,
     gameMapLeftCols: 15,
     gameMapBlockWidth: 1024,
     mapImage: './1024_map.jpg',
