@@ -1040,6 +1040,7 @@ const actionOptionsTree = [
       {label: '强制传送', value: 'force_tp'},
       {label: '输出日志', value: 'log_output'},
       {label: '退出重新登录', value: 'exit_and_relogin'},
+      {label: '进出千星奇域', value: 'wonderland_cycle'},
       {label: '设置时间', value: 'set_time'},
     ]
   }
