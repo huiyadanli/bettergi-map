@@ -1,11 +1,14 @@
 import sharp from 'sharp';
-import { writeFileSync, existsSync, rmSync, mkdirSync } from 'fs';
+import { writeFileSync, existsSync, rmSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join, resolve } from 'path';
 import { MAPS } from '../src/config/mapConfig.js';
 
 const BATCH_SIZE = 30;
 const ROOT = resolve(import.meta.dirname, '..');
-const TILES_DIR = join(ROOT, 'dist', 'tiles');
+const args = process.argv.slice(2);
+const CLEANUP_ONLY = args.includes('--cleanup');
+// 通过 CLI 参数指定输出目录，默认 tile-cache（内联模式），也可指定 dist/tiles（文件模式）
+const TILES_DIR = join(ROOT, args.find(a => !a.startsWith('--')) || 'tile-cache');
 
 async function generateTilesForMap(map) {
   const TILE_SIZE = map.tileSize;
@@ -96,26 +99,31 @@ async function generateTilesForMap(map) {
 }
 
 async function main() {
-  // 清空瓦片输出目录
-  if (existsSync(TILES_DIR)) {
-    rmSync(TILES_DIR, { recursive: true });
-    console.log('已清空 dist/tiles/\n');
-  }
-
-  console.log('开始生成瓦片\n');
   const tileMaps = Object.values(MAPS).filter(m => m.enableTiles);
-  const allMeta = {};
-  for (const map of tileMaps) {
-    console.log(`[${map.name}]`);
-    const meta = await generateTilesForMap(map);
-    if (meta) allMeta[map.name] = meta;
-    console.log('');
-  }
 
-  // meta 写入 dist/tiles/meta.js，供运行时动态加载
-  const metaJs = `// 由 generate-tiles 脚本自动生成，勿手动修改\nwindow.__TILE_META__=${JSON.stringify(allMeta)};\n`;
-  writeFileSync(join(TILES_DIR, 'meta.js'), metaJs);
-  console.log('生成 dist/tiles/meta.js');
+  if (!CLEANUP_ONLY) {
+    // 清空瓦片输出目录
+    if (existsSync(TILES_DIR)) {
+      rmSync(TILES_DIR, { recursive: true });
+      console.log(`已清空 ${TILES_DIR}\n`);
+    }
+
+    console.log('开始生成瓦片\n');
+    const allMeta = {};
+    for (const map of tileMaps) {
+      console.log(`[${map.name}]`);
+      const meta = await generateTilesForMap(map);
+      if (meta) allMeta[map.name] = meta;
+      console.log('');
+    }
+
+    // meta 写入全局格式，供 <script> 标签加载（dev 中间件 / 常规构建）
+    const metaJs = `window.__TILE_META__=${JSON.stringify(allMeta)};\n`;
+    writeFileSync(join(TILES_DIR, 'meta.js'), metaJs);
+    // 同时写 JSON 供 vite define 注入（单机构建）
+    writeFileSync(join(TILES_DIR, 'meta.json'), JSON.stringify(allMeta));
+    console.log(`生成 ${TILES_DIR}/meta.js + meta.json`);
+  }
 
   // 删除 dist 中已切瓦片的原图
   const resolutions = [512, 1024, 2048, 4096, 8192];
@@ -130,12 +138,33 @@ async function main() {
       const distPath = join(ROOT, 'dist', variant);
       if (existsSync(distPath)) {
         rmSync(distPath);
-        console.log(`已删除 dist/${variant}`);
+        console.log(`已删除 ${variant}`);
       }
     }
   }
 
-  console.log('全部完成');
+  // --cleanup 模式下，清理指定目录（如 tile-cache）
+  if (CLEANUP_ONLY && existsSync(TILES_DIR)) {
+    rmSync(TILES_DIR, { recursive: true });
+    console.log(`已清理 ${TILES_DIR}`);
+  }
+
+  // --cleanup 模式下，清理 dist 中 index.html 以外的所有文件
+  if (CLEANUP_ONLY) {
+    const distDir = join(ROOT, 'dist');
+    if (existsSync(distDir)) {
+      for (const entry of readdirSync(distDir, { withFileTypes: true })) {
+        if (entry.name === 'index.html') continue;
+        const fullPath = join(distDir, entry.name);
+        entry.isDirectory()
+          ? rmSync(fullPath, { recursive: true })
+          : unlinkSync(fullPath);
+        console.log(`已删除 dist/${entry.name}`);
+      }
+    }
+  }
+
+  console.log(CLEANUP_ONLY ? '清理完成' : '全部完成');
 }
 
 main().catch(err => {

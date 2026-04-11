@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:single": "vite --mode single",
-    "build": "vite build && node scripts/generate-tiles.js",
-    "build:single": "vite build --config vite.config.single.js --mode single && node scripts/generate-tiles.js",
+    "build": "vite build && node scripts/generate-tiles.js dist/tiles",
+    "build:single": "node scripts/generate-tiles.js tile-cache && vite build --config vite.config.single.js --mode single && node scripts/generate-tiles.js --cleanup tile-cache",
     "preview": "vite preview",
     "generate-tiles": "node scripts/generate-tiles.js"
   },

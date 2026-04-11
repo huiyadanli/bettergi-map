@@ -74,6 +74,17 @@ const MAPS = {
     tileSize: 512,
     quality: 80,
   },
+  Firmament: {
+    gameMapRows: 4,
+    gameMapCols: 3,
+    gameMapUpRows: 1,
+    gameMapLeftCols: 1,
+    displayName: '空之神殿',
+    source: 'public/templeofspace_1024.jpg',
+    enableTiles: true,
+    tileSize: 512,
+    quality: 80,
+  },
 };
 
 const runtimeMeta = typeof window !== 'undefined' ? window.__TILE_META__ : null;

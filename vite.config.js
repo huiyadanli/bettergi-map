@@ -7,13 +7,16 @@ import vue from '@vitejs/plugin-vue'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    __TILE_META__: 'undefined', // 非单机构建不需要，兜底防 ReferenceError
+  },
   plugins: [
     vue(),
-    // dev 时将 /tiles 请求代理到 dist/tiles/，让瓦片在开发模式可用
+    // dev 时将 /tiles 请求代理到 tile-cache/，让瓦片在开发模式可用
     {
       name: 'serve-dist-tiles',
       configureServer(server) {
-        const base = resolve('dist/tiles');
+        const base = resolve('tile-cache');
         server.middlewares.use('/tiles', (req, res, next) => {
           // 去掉 query string
           const urlPath = decodeURIComponent(req.url.split('?')[0]);

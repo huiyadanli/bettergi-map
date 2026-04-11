@@ -6,8 +6,8 @@ import '@geoman-io/leaflet-geoman-free';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import {CoordinateConverter} from './utils/coordinateConverter';
 import {Message, Modal} from '@arco-design/web-vue';
-import {setPosition} from "leaflet/src/dom/DomUtil.js";
 import {MAPS} from './config/mapConfig';
+import {getTileUrl, hasTiles} from './utils/tileIndex';
 
 // 添加环境变量的引用
 const mode = import.meta.env.VITE_MODE;
@@ -57,18 +57,27 @@ const loadLocal = (k) => {
 }
 
 onMounted(async () => {
-  // 动态加载瓦片 meta，替换瓦片换文件夹即可更换图源
-  await new Promise(resolve => {
-    const s = document.createElement('script');
-    s.src = './tiles/meta.js';
-    s.onload = resolve;
-    s.onerror = resolve; // 文件不存在时静默跳过
-    document.head.appendChild(s);
-  });
-
-  // 重新读取运行时 meta
-  for (const map of Object.values(MAPS)) {
-    map.meta = window.__TILE_META__?.[map.name] || null;
+  // 加载瓦片 meta
+  // import.meta.env.VITE_MODE 是构建时常量，Vite 做死代码消除：
+  //   single -> true -> 用 vite define 注入的 __TILE_META__
+  //   其他  -> false -> <script> 标签加载 meta.js
+  if (import.meta.env.VITE_MODE === 'single' && __TILE_META__) {
+    for (const map of Object.values(MAPS)) {
+      map.meta = __TILE_META__[map.name] || null;
+    }
+  } else {
+    // 通过 <script> 标签加载 meta.js
+    // dev 模式由 vite 中间件提供，常规构建由 dist/tiles/meta.js 提供
+    await new Promise(resolve => {
+      const s = document.createElement('script');
+      s.src = './tiles/meta.js';
+      s.onload = resolve;
+      s.onerror = resolve;
+      document.head.appendChild(s);
+    });
+    for (const map of Object.values(MAPS)) {
+      map.meta = window.__TILE_META__?.[map.name] || null;
+    }
   }
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -105,7 +114,7 @@ async function initMap() {
 
   const config = currentMapConfig.value;
 
-  // meta 内联在 tileMeta.js 里，无 fetch 依赖
+  // meta 由 vite define 注入或 <script> 标签加载，无 fetch 依赖
   const meta = config.enableTiles ? config.meta : null;
   const useTiles = meta !== null;
 
@@ -148,16 +157,35 @@ async function initMap() {
     crs,
     minZoom: useTiles ? 0 : -4,
     maxZoom: useTiles ? meta.maxTileZoom + 3 : 5,
+    maxBounds: [[0, 0], [h, w]],
+    maxBoundsViscosity: 1.0,
   });
 
   if (useTiles) {
-    L.tileLayer(`${config.tileDir}/{z}/{x}/{y}.webp`, {
+    if (mode === 'single' && hasTiles) {
+      // single内联模式：瓦片通过 import.meta.glob 全部内联
+      const tileOpts = {
+        tileSize: meta.tileSize || 512,
+        minNativeZoom: 0,
+        maxNativeZoom: meta.maxTileZoom,
+        bounds: [[0, 0], [h, w]],
+        noWrap: true,
+      };
+      const tileLayer = L.tileLayer('', tileOpts);
+      tileLayer.getTileUrl = function(coords) {
+        return getTileUrl(`${config.name}/${coords.z}/${coords.x}/${coords.y}.webp`) || '';
+      };
+      tileLayer.addTo(map.value);
+    } else {
+      // 在线/文件模式：从 URL 加载
+      L.tileLayer(`${config.tileDir}/{z}/{x}/{y}.webp`, {
       tileSize: meta.tileSize || 512,
       minNativeZoom: 0,
       maxNativeZoom: meta.maxTileZoom,
       bounds: [[0, 0], [h, w]],
       noWrap: true,
     }).addTo(map.value);
+    }
   } else {
     L.imageOverlay(config.mapImage, [[0, 0], [h, w]]).addTo(map.value);
   }
