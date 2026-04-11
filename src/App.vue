@@ -7,73 +7,15 @@ import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import {CoordinateConverter} from './utils/coordinateConverter';
 import {Message, Modal} from '@arco-design/web-vue';
 import {setPosition} from "leaflet/src/dom/DomUtil.js";
+import {MAPS} from './config/mapConfig';
 
 // 添加环境变量的引用
 const mode = import.meta.env.VITE_MODE;
-// 地图配置
-const mapConfigs = {
-  Teyvat: {
-    gameMapRows: 15,
-    gameMapCols: 22,
-    gameMapUpRows: 7,
-    gameMapLeftCols: 15,
-    gameMapBlockWidth: 1024,
-    mapImage: './1024_map.jpg',
-    displayName: '提瓦特大陆',
-  },
-  TheChasm: {
-    gameMapRows: 2,
-    gameMapCols: 2,
-    gameMapUpRows: 1,
-    gameMapLeftCols: 1,
-    gameMapBlockWidth: 1024,
-    mapImage: './thechasm_1024_map.jpg',
-    displayName: '层岩巨渊',
-  },
-  Enkanomiya: {
-    gameMapRows: 3,
-    gameMapCols: 3,
-    gameMapUpRows: 1,
-    gameMapLeftCols: 1,
-    gameMapBlockWidth: 1024,
-    mapImage: './enkanomiya_1024_map.jpg',
-    displayName: '渊下宫',
-  },
-  SeaOfBygoneEras: {
-    gameMapRows: 3,
-    gameMapCols: 4,
-    gameMapUpRows: 2,
-    gameMapLeftCols: 5,
-    gameMapBlockWidth: 1024,
-    mapImage: './seaofbygoneeras_1024_map.jpg',
-    displayName: '旧日之海',
-  },
-  AncientSacredMountain: {
-    gameMapRows: 4,
-    gameMapCols: 4,
-    gameMapUpRows: 1,
-    gameMapLeftCols: 1,
-    gameMapBlockWidth: 1024,
-    mapImage: "./ancientsacredmountain_1024.jpg",
-    displayName: "远古圣山",
-  },
-  TempleOfSpace: {
-    gameMapRows: 4,
-    gameMapCols: 3,
-    gameMapUpRows: 1,
-    gameMapLeftCols: 1,
-    gameMapBlockWidth: 1024,
-    mapImage: "./templeofspace_1024.jpg",
-    displayName: "空之神殿",
-  },
-};
 
 // 当前地图相关变量
 const currentMapName = ref('Teyvat');
-const currentMapConfig = computed(() => mapConfigs[currentMapName.value]);
+const currentMapConfig = computed(() => MAPS[currentMapName.value]);
 const coordinateConverter = ref(new CoordinateConverter(currentMapConfig.value));
-const mapImage = ref(currentMapConfig.value.mapImage);
-const isMapLoaded = ref(false);
 
 
 // 修改这一行
@@ -114,27 +56,38 @@ const loadLocal = (k) => {
   return JSON.parse(val);
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 动态加载瓦片 meta，替换瓦片换文件夹即可更换图源
+  await new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = './tiles/meta.js';
+    s.onload = resolve;
+    s.onerror = resolve; // 文件不存在时静默跳过
+    document.head.appendChild(s);
+  });
+
+  // 重新读取运行时 meta
+  for (const map of Object.values(MAPS)) {
+    map.meta = window.__TILE_META__?.[map.name] || null;
+  }
+
   const urlParams = new URLSearchParams(window.location.search);
   const mapParam = urlParams.get('map');
 
-  if (mapParam && mapConfigs[mapParam]) {
+  if (mapParam && MAPS[mapParam]) {
     currentMapName.value = mapParam;
-    currentMapConfig.value = mapConfigs[mapParam];
+    currentMapConfig.value = MAPS[mapParam];
     coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
-    mapImage.value = currentMapConfig.value.mapImage;
   }
 
-  // Remove the map parameter from the URL
-  urlParams.delete('map');
-  let p = urlParams.toString();
-  let newUrl = `${window.location.pathname}?${p}`;
-  if (p.length === 0) {
-    newUrl = `${window.location.pathname}`;
+  if (location.protocol !== 'file:') {
+    urlParams.delete('map');
+    let p = urlParams.toString();
+    let newUrl = `${window.location.pathname}${p ? '?' + p : ''}`;
+    window.history.replaceState(null, '', newUrl);
   }
-  window.history.replaceState(null, '', newUrl);
 
-  loadMapImageAndInit(mapImage.value);
+  initMap();
 });
 
 function JSONStringifyOrdered(obj, space)
@@ -144,37 +97,79 @@ function JSONStringifyOrdered(obj, space)
     return JSON.stringify(obj, Array.from(allKeys).sort(), space);
 }
  
-function loadMapImageAndInit(mapImageSrc) {
-  isMapLoaded.value = false; // 地图加载开始
-  const img = new Image();
-  img.onload = function () {
-    imageWidth.value = this.width;
-    imageHeight.value = this.height;
-    initMap();
-    isMapLoaded.value = true; // 地图加载完成
-  };
-  img.src = mapImageSrc;
-}
-
-function initMap() {
-  // Check if the map instance already exists
+async function initMap() {
   if (map.value) {
-    map.value.remove(); // Destroy the existing map instance
-    map.value = null;   // Reset the map reference
+    map.value.remove();
+    map.value = null;
+  }
+
+  const config = currentMapConfig.value;
+
+  // meta 内联在 tileMeta.js 里，无 fetch 依赖
+  const meta = config.enableTiles ? config.meta : null;
+  const useTiles = meta !== null;
+
+  let w, h;
+
+  if (useTiles) {
+    w = meta.imageWidth;
+    h = meta.imageHeight;
+  } else {
+    // 加载原图获取尺寸
+    await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        w = img.width;
+        h = img.height;
+        resolve();
+      };
+      img.src = config.mapImage;
+    });
+  }
+
+  // 根据实际图片高度自动计算 pixelScale，替换不同分辨率图片后无需改配置
+  const actualPixelScale = h / (config.gameMapRows * 1024);
+  coordinateConverter.value.pixelScale = actualPixelScale;
+
+  // 缩放变换使 zoom 0 = 全景，zoom maxTileZoom 约为 原生分辨率
+  let crs;
+  if (useTiles) {
+    const maxDim = Math.max(w, h);
+    const s = 512 / maxDim;
+    crs = L.extend({}, L.CRS.Simple, {
+      transformation: new L.Transformation(s, 0, s, 0),
+    });
+  } else {
+    crs = L.CRS.Simple;
   }
 
   map.value = L.map('map', {
     attributionControl: false,
-    crs: L.CRS.Simple,
-    minZoom: -4,  // 允许缩小
-    maxZoom: 5    // 允许放大
+    crs,
+    minZoom: useTiles ? 0 : -4,
+    maxZoom: useTiles ? meta.maxTileZoom + 3 : 5,
   });
 
-  const bounds = [[0, 0], [imageHeight.value, imageWidth.value]];
-  L.imageOverlay(mapImage.value, bounds).addTo(map.value);
+  if (useTiles) {
+    L.tileLayer(`${config.tileDir}/{z}/{x}/{y}.webp`, {
+      tileSize: meta.tileSize || 512,
+      minNativeZoom: 0,
+      maxNativeZoom: meta.maxTileZoom,
+      bounds: [[0, 0], [h, w]],
+      noWrap: true,
+    }).addTo(map.value);
+  } else {
+    L.imageOverlay(config.mapImage, [[0, 0], [h, w]]).addTo(map.value);
+  }
 
-  map.value.fitBounds(bounds);
-  map.value.setZoom(0);
+  imageWidth.value = w;
+  imageHeight.value = h;
+
+  // 等待浏览器布局完成后再 fitBounds，否则容器尺寸可能为 0 导致地图吸顶
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  map.value.invalidateSize();
+  map.value.fitBounds([[0, 0], [h, w]]);
+  map.value.setZoom(1);
 
   // 初始化 Geoman 控件
   map.value.pm.addControls({
@@ -213,39 +208,24 @@ function initMap() {
 }
 
 // 切换地图
-function switchMap(mapName) {
-  return new Promise((resolve) => {
-    changeBgiMapSettingsName(mapName);
+async function switchMap(mapName) {
+  changeBgiMapSettingsName(mapName);
 
-    currentMapName.value = mapName;
-    currentMapConfig.value = mapConfigs[mapName];
-    coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
-    mapImage.value = currentMapConfig.value.mapImage;
+  currentMapName.value = mapName;
+  currentMapConfig.value = MAPS[mapName];
+  coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
 
-    // 清空地图上的折线和点位
-    polylines.value = [];
-    if (map.value) {
-      map.value.eachLayer((layer) => {
-        if (layer instanceof L.Polyline || layer instanceof L.Marker) {
-          map.value.removeLayer(layer);
-        }
-      });
-    }
-
-    // 重新加载地图
-    loadMapImageAndInit(mapImage.value);
-
-    // 使用轮询检查地图是否加载完成
-    const checkMapLoaded = () => {
-      if (isMapLoaded.value) {
-        resolve();
-      } else {
-        requestAnimationFrame(checkMapLoaded); // 继续检查
+  // 清空地图上的折线和点位
+  polylines.value = [];
+  if (map.value) {
+    map.value.eachLayer((layer) => {
+      if (layer instanceof L.Polyline || layer instanceof L.Marker) {
+        map.value.removeLayer(layer);
       }
-    };
+    });
+  }
 
-    checkMapLoaded(); // 开始检查
-  });
+  await initMap();
 }
 
 function changeBgiMapSettingsName(mapName) {
@@ -348,10 +328,10 @@ function addPolyline(layer, name = "未命名路径") {
 
 async function addImportedPolyline(importedData, filePath = null) {
   const mapName = importedData.info.map_name || 'Teyvat'; // 默认地图为 Teyvat
-  if (mapName !== currentMapName.value && mapConfigs[mapName]) {
+  if (mapName !== currentMapName.value && MAPS[mapName]) {
     // 显示切换地图提示，减少意外的卡顿
-    const mapDisplayName = mapConfigs[mapName].displayName;
-    const currentMapDisplayName = mapConfigs[currentMapName.value].displayName;
+    const mapDisplayName = MAPS[mapName].displayName;
+    const currentMapDisplayName = MAPS[currentMapName.value].displayName;
       try {
       await new Promise((resolve, reject) => {
         Modal.confirm({
@@ -635,8 +615,8 @@ async function confirmImportFiles() {
     } else if (needSwitchMap) {
       // 单个不同地图，提示用户
       const targetMapName = mapNames[0];
-      const mapDisplayName = mapConfigs[targetMapName]?.displayName || targetMapName;
-      const currentMapDisplayName = mapConfigs[currentMapName.value].displayName;
+      const mapDisplayName = MAPS[targetMapName]?.displayName || targetMapName;
+      const currentMapDisplayName = MAPS[currentMapName.value].displayName;
         try {
         await new Promise((resolve, reject) => {
           Modal.confirm({
@@ -983,8 +963,9 @@ const selectedPolyline = computed(() => {
 
 function selectPolyline(index) {
   selectedPolylineIndex.value = index;
-  map.value.fitBounds(polylines.value[index].layer.getBounds());
-  map.value.setZoom(2);
+  const meta = currentMapConfig.value.meta;
+  const maxZoom = meta ? meta.maxTileZoom : 5;
+  map.value.setView(polylines.value[index].layer.getBounds().getCenter(), maxZoom);
 }
 
 function deletePolyline(index) {
@@ -1555,7 +1536,7 @@ function formatNumber(num) {
             <a-space>
               <!-- 地图选择框 -->
               <a-select v-model="currentMapName" @change="switchMap" style="width: 160px; margin-right: 10px">
-                <a-option v-for="(config, name) in mapConfigs" :key="name" :value="name">
+                <a-option v-for="(config, name) in MAPS" :key="name" :value="name">
                   {{ config.displayName }}
                 </a-option>
               </a-select>

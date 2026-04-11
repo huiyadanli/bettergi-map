@@ -13,6 +13,7 @@ dist
 dist-ssr
 coverage
 *.local
+./package-lock.json
 
 /cypress/videos/
 /cypress/screenshots/
@@ -21,6 +22,7 @@ coverage
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude
 *.suo
 *.ntvs*
 *.njsproj
