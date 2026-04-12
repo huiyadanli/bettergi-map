@@ -57,6 +57,15 @@ const mapConfigs = {
     mapImage: "./ancientsacredmountain_1024.jpg",
     displayName: "远古圣山",
   },
+  TempleOfSpace: {
+    gameMapRows: 4,
+    gameMapCols: 3,
+    gameMapUpRows: 1,
+    gameMapLeftCols: 1,
+    gameMapBlockWidth: 1024,
+    mapImage: "./templeofspace_1024.jpg",
+    displayName: "空之神殿",
+  },
 };
 
 // 当前地图相关变量
