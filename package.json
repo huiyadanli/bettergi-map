@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "dev:single": "vite --mode single",
-    "build": "vite build",
-    "build:single": "vite build --config vite.config.single.js --mode single",
-    "preview": "vite preview"
+    "build": "vite build && node scripts/generate-tiles.js dist/tiles",
+    "build:single": "node scripts/generate-tiles.js tile-cache && vite build --config vite.config.single.js --mode single && node scripts/generate-tiles.js --cleanup tile-cache",
+    "preview": "vite preview",
+    "generate-tiles": "node scripts/generate-tiles.js"
   },
   "dependencies": {
     "@geoman-io/leaflet-geoman-free": "^2.17.0",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@arco-design/web-vue": "^2.56.2",
     "@vitejs/plugin-vue": "^5.0.5",
+    "sharp": "^0.34.5",
     "vite": "^5.3.1",
     "vite-plugin-singlefile": "^2.0.2"
   }
