@@ -1654,7 +1654,7 @@ function formatNumber(num) {
                        placeholder="录入下落攻击等待时间(毫秒)" strict/>
               <a-input allow-clear v-if="record.action==='set_time'" v-model="record.action_params"
                        placeholder="录入需要设置的时间 HH:MM" strict/>
-              <a-input allow-clear v-if="record.action==='linia_mining'" v-model="record.action_params"
+              <a-input allow-clear v-if="record.action==='linnea_mining'" v-model="record.action_params"
                        placeholder="射箭次数,旋转寻矿次数 默认1,5" strict/>
               <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action==='combat_script'"
                                v-model="record.action_params" placeholder="录入或清空后选择策略" strict/>
