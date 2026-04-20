@@ -1037,7 +1037,7 @@ const actionOptionsTree = [
   {label: '下落攻击', value: 'stop_flying'},
   {label: '四叶印', value: 'up_down_grab_leaf'},
   {label: '挖矿', value: 'mining'},
-  {label: '莉奈娅挖矿', value: 'linia_mining'},
+  {label: '莉奈娅挖矿', value: 'linnea_mining'},
   {label: '钓鱼', value: 'fishing'},
   {label: '聚集材料', value: 'pick_up_collect'},
   {label: '在附近拾取', value: 'pick_around'},
