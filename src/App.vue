@@ -78,7 +78,7 @@ const handleKeyDown = (e) => {
     e.preventDefault();
     undoStep();
   }
-  if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
     e.preventDefault();
     redoStep();
   }
@@ -1849,7 +1849,7 @@ function formatNumber(num) {
 
           <template #extra>
             <a-tooltip content="撤销 (Ctrl+Z)"><a-button @click="undoStep" :disabled="!canUndo" type="text" size="small"><icon-undo /></a-button></a-tooltip>
-            <a-tooltip content="前进 (Ctrl+Y)"><a-button @click="redoStep" :disabled="!canRedo" type="text" size="small"><icon-redo /></a-button></a-tooltip>
+            <a-tooltip content="前进 (Ctrl+Shift+Z)"><a-button @click="redoStep" :disabled="!canRedo" type="text" size="small"><icon-redo /></a-button></a-tooltip>
             <a-button @click="clearSelection" :disabled="selectedPointIndex === -1" type="primary" size="small">取消选中</a-button>
             <a-button @click="clearPoints" type="primary" style="margin-left: 20px;" size="small">清空</a-button>
             <a-popconfirm content="是否确认合并！" @ok="mergedPolyline" okText="确认" cancelText="关闭">
