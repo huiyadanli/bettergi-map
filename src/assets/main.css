@@ -1,0 +1,40 @@
+.arco-select-dropdown-list-wrapper {
+  max-height: 300px;
+}
+
+.arco-cascader-column-content {
+  max-height: 300px;
+}
+
+.arco-cascader-panel {
+  height: 300px;
+}
+
+.arco-cascader-panel-column {
+  max-height: 300px;
+}
+
+.arco-table .arco-table-cell:nth-child(3) {
+  white-space: normal !important;
+}
+
+.coord-cell {
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.coord-x {
+  color: red;
+  white-space: nowrap;
+}
+
+.coord-y {
+  color: green;
+  white-space: nowrap;
+}
+
+.play-btn {
+  padding: 1px !important;
+  font-size: 16px !important;
+}

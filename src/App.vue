@@ -1,5 +1,5 @@
 <script setup>
-import {onMounted, ref, computed} from 'vue';
+import {onMounted, onUnmounted, ref, computed, watch, nextTick} from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free';
@@ -24,6 +24,19 @@ const imageHeight = ref(0);
 const map = ref(null);
 const polylines = ref([]);
 const selectedPolylineIndex = ref(0);
+const MAX_HISTORY = 50;
+const columns = computed(() => {
+  if (mode === 'single') {
+    return [{title: '', dataIndex: 'play', slotName: 'play'}, ...columnsBase];
+  }
+  return columnsBase;
+});
+const historyStack = ref([]);
+const historyPointer = ref(-1);
+let isRestoring = false;
+
+const canUndo = computed(() => historyPointer.value > 0);
+const canRedo = computed(() => historyPointer.value < historyStack.value.length - 1);
 
 // 添加新的响应式变量
 const newPointX = ref(0);
@@ -56,7 +69,23 @@ const loadLocal = (k) => {
   return JSON.parse(val);
 }
 
+const handleKeyDown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    saveCurrentRoute();
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    undoStep();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    redoStep();
+  }
+};
+
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeyDown);
   // 加载瓦片 meta
   // import.meta.env.VITE_MODE 是构建时常量，Vite 做死代码消除：
   //   single -> true -> 用 vite define 注入的 __TILE_META__
@@ -97,6 +126,10 @@ onMounted(async () => {
   }
 
   initMap();
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown);
 });
 
 function JSONStringifyOrdered(obj, space)
@@ -156,7 +189,7 @@ async function initMap() {
     attributionControl: false,
     crs,
     minZoom: useTiles ? 0 : -4,
-    maxZoom: useTiles ? meta.maxTileZoom + 3 : 5,
+    maxZoom: useTiles ? meta.maxTileZoom + 4 : 5,
     maxBounds: [[0, 0], [h, w]],
     maxBoundsViscosity: 1.0,
   });
@@ -351,6 +384,7 @@ function addPolyline(layer, name = "未命名路径") {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  snapshotPolyline();
   selectPolyline(selectedPolylineIndex.value);
 }
 
@@ -429,6 +463,7 @@ async function addImportedPolyline(importedData, filePath = null) {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  snapshotPolyline();
   selectPolyline(selectedPolylineIndex.value);
 }
 
@@ -484,6 +519,7 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  snapshotPolyline();
   selectPolyline(selectedPolylineIndex.value);
 }
 
@@ -982,6 +1018,112 @@ function handleExport() {
   }
 
   showExportModal.value = false;
+  snapshotPolyline();
+}
+
+function snapshotPolyline() {
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  if (!polyline) return;
+  const snapshot = JSON.stringify({
+    positions: polyline.positions,
+    info: polyline.info,
+    name: polyline.name,
+    tags: polyline.tags,
+    enable_monster_loot_split: polyline.enable_monster_loot_split,
+    map_match_method: polyline.map_match_method
+  });
+  // 不重复推入相同快照
+  if (historyStack.value[historyPointer.value] === snapshot) return;
+  historyStack.value = historyStack.value.slice(0, historyPointer.value + 1);
+  historyStack.value.push(snapshot);
+  if (historyStack.value.length > MAX_HISTORY) {
+    historyStack.value.shift();
+  }
+  historyPointer.value = historyStack.value.length - 1;
+}
+
+watch(
+  () => {
+    const polyline = polylines.value[selectedPolylineIndex.value];
+    if (!polyline) return null;
+    return JSON.stringify({
+      positions: polyline.positions,
+      info: polyline.info,
+      name: polyline.name,
+      tags: polyline.tags,
+      enable_monster_loot_split: polyline.enable_monster_loot_split,
+      map_match_method: polyline.map_match_method
+    });
+  },
+  (newVal) => {
+    if (!newVal || isRestoring) return;
+    if (historyStack.value.length === 0) {
+      historyStack.value.push(newVal);
+      historyPointer.value = 0;
+    } else if (newVal !== historyStack.value[historyPointer.value]) {
+      historyStack.value = historyStack.value.slice(0, historyPointer.value + 1);
+      historyStack.value.push(newVal);
+      if (historyStack.value.length > MAX_HISTORY) {
+        historyStack.value.shift();
+      }
+      historyPointer.value = historyStack.value.length - 1;
+    }
+  }
+);
+
+function saveCurrentRoute() {
+  snapshotPolyline();
+  Message.success('已保存');
+}
+
+function restoreFromHistory(pointer) {
+  isRestoring = true;
+  const snapshot = JSON.parse(historyStack.value[pointer]);
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  if (!polyline) { isRestoring = false; return; }
+  polyline.positions = snapshot.positions;
+  polyline.info = snapshot.info;
+  polyline.name = snapshot.name;
+  polyline.tags = snapshot.tags;
+  polyline.enable_monster_loot_split = snapshot.enable_monster_loot_split;
+  polyline.map_match_method = snapshot.map_match_method;
+  const latlngs = snapshot.positions.map(pos => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
+  polyline.layer.setLatLngs(latlngs);
+  selectedPointIndex.value = -1;
+  nextTick(() => { isRestoring = false; });
+}
+
+function runFromPoint(rowIndex) {
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  if (!polyline) return;
+  const slicedPositions = polyline.positions.slice(rowIndex);
+  const data = {
+    info: polyline.info || {},
+    positions: slicedPositions
+  };
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.mapEditorWebBridge;
+    fileAccessBridge.RunPathing(JSONStringifyOrdered(data, 2));
+    Message.success(`已从第 ${rowIndex + 1} 个点位开始运行`);
+  } catch (error) {
+    console.error('运行路线失败:', error);
+    Message.error('运行路线失败: ' + error.message);
+  }
+}
+
+function undoStep() {
+  if (!canUndo.value) return;
+  historyPointer.value--;
+  restoreFromHistory(historyPointer.value);
+}
+
+function redoStep() {
+  if (!canRedo.value) return;
+  historyPointer.value++;
+  restoreFromHistory(historyPointer.value);
 }
 
 const selectedPolyline = computed(() => {
@@ -990,10 +1132,12 @@ const selectedPolyline = computed(() => {
 });
 
 function selectPolyline(index) {
+  snapshotPolyline();
   selectedPolylineIndex.value = index;
   const meta = currentMapConfig.value.meta;
   const maxZoom = meta ? meta.maxTileZoom : 5;
-  map.value.setView(polylines.value[index].layer.getBounds().getCenter(), maxZoom);
+  const targetZoom = maxZoom + 1;
+  map.value.setView(polylines.value[index].layer.getBounds().getCenter(), Math.max(map.value.getZoom(), targetZoom));
 }
 
 function deletePolyline(index) {
@@ -1288,7 +1432,9 @@ function selectPoint(record) {
   }).addTo(map.value);
 
   // 将地图视图居中到选中的点
-  map.value.setView([main1024Pos.y, main1024Pos.x], map.value.getZoom());
+  const meta = currentMapConfig.value.meta;
+  const targetZoom = (meta ? meta.maxTileZoom : 5) + 1;
+  map.value.setView([main1024Pos.y, main1024Pos.x], Math.max(map.value.getZoom(), targetZoom));
 }
 
 function clearSelection() {
@@ -1518,6 +1664,8 @@ function addSpliePolyline(importedData) {
   layer.on('pm:edit', handleMapPointChange);
   importedData.layer = layer;
   polylines.value.push(importedData);
+  selectedPolylineIndex.value = polylines.value.length - 1;
+  snapshotPolyline();
 }
 
 const showEditPointModal = ref(false);
@@ -1603,13 +1751,16 @@ function formatNumber(num) {
             <template #drag-handle-icon>
               <icon-drag-dot-vertical/>
             </template>
+            <template #play="{ rowIndex }">
+              <a-tooltip content="从此处运行"><a-button type="text" size="mini" class="play-btn" @click="runFromPoint(rowIndex)"><icon-play-arrow /></a-button></a-tooltip>
+            </template>
             <template #id="{ record, rowIndex }">
               <span :style="{color:(record.point_ext_params?'blue':'')}">{{ record.id }}</span>
             </template>
             <template #xy="{ record, rowIndex }">
-              <a-button type="text" @click="editPointModal(record,rowIndex)">{{ formatNumber(record.x) }},
-                {{ formatNumber(record.y) }}
-              </a-button>
+              <div class="coord-cell" @click="editPointModal(record,rowIndex)">
+                <span class="coord-x">{{ formatNumber(record.x) }}</span> <span class="coord-y">{{ formatNumber(record.y) }}</span>
+              </div>
             </template>
             <template #x="{ record, rowIndex }">
               <a-input-number
@@ -1645,7 +1796,7 @@ function formatNumber(num) {
                   :options="actionOptionsTree"
                   placeholder="请选择动作"
                   @change="actionChange(record)"
-                  style="min-width: 120px"
+                  style="min-width: 100px"
                   :field-names="{ label: 'label', value: 'value', children: 'children' }"
               />
               <a-input allow-clear v-if="record.action==='log_output'" v-model="record.action_params"
@@ -1697,6 +1848,8 @@ function formatNumber(num) {
           </a-table>
 
           <template #extra>
+            <a-tooltip content="撤销 (Ctrl+Z)"><a-button @click="undoStep" :disabled="!canUndo" type="text" size="small"><icon-undo /></a-button></a-tooltip>
+            <a-tooltip content="前进 (Ctrl+Shift+Z)"><a-button @click="redoStep" :disabled="!canRedo" type="text" size="small"><icon-redo /></a-button></a-tooltip>
             <a-button @click="clearSelection" :disabled="selectedPointIndex === -1" type="primary" size="small">取消选中</a-button>
             <a-button @click="clearPoints" type="primary" style="margin-left: 20px;" size="small">清空</a-button>
             <a-popconfirm content="是否确认合并！" @ok="mergedPolyline" okText="确认" cancelText="关闭">
@@ -2111,7 +2264,7 @@ function formatNumber(num) {
 </template>
 
 <script>
-const columns = [
+const columnsBase = [
   {title: '#', dataIndex: 'id', slotName: 'id'},
   {title: '坐标', dataIndex: 'xy', slotName: 'xy'},
   /*  { title: 'X坐标', dataIndex: 'x', slotName: 'x' },
@@ -2138,6 +2291,8 @@ const columns = [
 :deep(.arco-table-tr) {
   cursor: pointer;
 }
+
+
 
 .layout {
   height: 100vh;
@@ -2170,3 +2325,4 @@ const columns = [
   padding: 8px 8px !important;
 }
 </style>
+
