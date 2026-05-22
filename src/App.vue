@@ -995,6 +995,10 @@ function handleExport() {
       y: Math.round(pos.y * 10000) / 10000
     }))
   };
+  // 保留原始文件的 bgi_version，不覆盖
+  if (polyline.oldFileData?.info?.bgi_version) {
+    data.info.bgi_version = polyline.oldFileData.info.bgi_version;
+  }
   //合并data 保留自定义属等，不能在编辑器中编辑的数据  oldFileData
   data=deepMerge(polyline.oldFileData || {},data);
   
