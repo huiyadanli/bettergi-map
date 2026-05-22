@@ -989,8 +989,16 @@ function handleExport() {
       , map_match_method: polyline.map_match_method || '' //地图匹配方法
 
     },
-    positions: polyline.positions // 已经是游戏坐标，无需转换
+    positions: polyline.positions.map(pos => ({
+      ...pos,
+      x: Math.round(pos.x * 10000) / 10000,
+      y: Math.round(pos.y * 10000) / 10000
+    }))
   };
+  // 保留原始文件的 bgi_version，不覆盖
+  if (polyline.oldFileData?.info?.bgi_version) {
+    data.info.bgi_version = polyline.oldFileData.info.bgi_version;
+  }
   //合并data 保留自定义属等，不能在编辑器中编辑的数据  oldFileData
   data=deepMerge(polyline.oldFileData || {},data);
   

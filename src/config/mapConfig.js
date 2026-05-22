@@ -74,7 +74,7 @@ const MAPS = {
     tileSize: 512,
     quality: 80,
   },
-  Firmament: {
+  TempleOfSpace: {
     gameMapRows: 4,
     gameMapCols: 3,
     gameMapUpRows: 1,
