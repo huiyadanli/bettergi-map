@@ -502,6 +502,7 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
     name: importedData.info.name,
     tags: importedData.info.tags || [],
     enable_monster_loot_split: !!importedData.info.enable_monster_loot_split,
+    map_match_method: importedData.info.map_match_method || '',
     layer: layer,
     positions: importedData.positions.map((pos, index) => ({
       id: index + 1,
@@ -513,9 +514,9 @@ function addImportedPolylineWithoutMapSwitch(importedData, filePath = null) {
       type: pos.type || 'path',
       point_ext_params: pos.point_ext_params || undefined
     })),
-    info: processedInfo, // 使用处理后的info
-    savedPath: filePath, // 记录原始文件路径
-    oldFileData:importedData //原始文件数据，用于导出时合并
+    info: processedInfo,
+    savedPath: filePath,
+    oldFileData:importedData
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
@@ -1107,11 +1108,31 @@ function restoreFromHistory(pointer) {
 function runFromPoint(rowIndex) {
   const polyline = polylines.value[selectedPolylineIndex.value];
   if (!polyline) return;
-  const slicedPositions = polyline.positions.slice(rowIndex);
-  const data = {
-    info: polyline.info || {},
-    positions: slicedPositions
+  const info = polyline.info || {};
+  let data = {
+    info: {
+      name: polyline.name,
+      type: info.type || "collect",
+      authors: info.authors || [],
+      version: info.version || '1.0',
+      description: info.description || '',
+      map_name: currentMapName.value,
+      bgi_version: import.meta.env.VITE_BGI_VERSION,
+      tags: polyline.tags || [],
+      last_modified_time: Date.now(),
+      enable_monster_loot_split: !!polyline.enable_monster_loot_split,
+      map_match_method: polyline.map_match_method || ''
+    },
+    positions: polyline.positions.slice(rowIndex).map(pos => ({
+      ...pos,
+      x: Math.round(pos.x * 10000) / 10000,
+      y: Math.round(pos.y * 10000) / 10000
+    }))
   };
+  if (polyline.oldFileData?.info?.bgi_version) {
+    data.info.bgi_version = polyline.oldFileData.info.bgi_version;
+  }
+  data = deepMerge(polyline.oldFileData || {}, data);
   try {
     const fileAccessBridge = chrome.webview.hostObjects.mapEditorWebBridge;
     fileAccessBridge.RunPathing(JSONStringifyOrdered(data, 2));
