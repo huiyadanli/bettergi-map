@@ -58,6 +58,8 @@ const exportAuthors = ref([{name: '', links: ''}]);
 const exportVersion = ref('1.0');
 const exportDescription = ref('');
 const showExportModal = ref(false);
+const showAuthorSelectModal = ref(false);
+const selectedAuthorRowIndex = ref(-1);
 
 //本地存储
 const saveLocal = (k, v) => {
@@ -862,7 +864,7 @@ function updatePolyline(layer) {
   }
 }
 
-let preAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [{name: '', links: ''}];
+const preAuthors = ref((loadLocal("_preAuthors") || {}).preAuthors || [{name: '', links: '', def: false}]);
 
 // 作者管理函数
 function addAuthor() {
@@ -872,6 +874,31 @@ function addAuthor() {
 function removeAuthor(index) {
   if (exportAuthors.value.length > 1) {
     exportAuthors.value.splice(index, 1);
+  }
+}
+
+function handlePresetAuthor(action, payload) {
+  if (action === 'open') {
+    const storedPreAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [];
+    preAuthors.value = storedPreAuthors.length > 0 ? storedPreAuthors : [{name: '', links: '', def: false}];
+    selectedAuthorRowIndex.value = payload;
+    showAuthorSelectModal.value = true;
+  } else if (action === 'add') {
+    preAuthors.value.push({name: '', links: '', def: false});
+  } else if (action === 'delete') {
+    preAuthors.value.length > 1 ? preAuthors.value.splice(payload, 1) : preAuthors.value = [{name: '', links: '', def: false}];
+  } else if (action === 'save') {
+    saveLocal("_preAuthors", {preAuthors: preAuthors.value});
+    Message.success('预设作者已保存');
+  } else if (action === 'select') {
+    if (selectedAuthorRowIndex.value >= 0 && exportAuthors.value[selectedAuthorRowIndex.value]) {
+      saveLocal("_preAuthors", {preAuthors: preAuthors.value});
+      exportAuthors.value[selectedAuthorRowIndex.value] = {
+        name: payload.name || '',
+        links: payload.links || ''
+      };
+    }
+    showAuthorSelectModal.value = false;
   }
 }
 
@@ -941,11 +968,14 @@ function handleExport() {
     if (!inputHasAuthor) {
       // 从localStorage获取最新的预设作者
       const storedPreAuthors = (loadLocal("_preAuthors") || {}).preAuthors || [];
-      if (storedPreAuthors.length > 0) {
-        // 应用预设作者
-        exportAuthors.value = storedPreAuthors.map(author => ({...author}));
-        const authorsList = storedPreAuthors.map(author => author.name).join('、');
-        Message.info(`当前作者信息为空，使用预设作者：${authorsList}`);
+      const defaultAuthors = storedPreAuthors.filter(author => author.def && author.name);
+      if (defaultAuthors.length > 0) {
+        exportAuthors.value = defaultAuthors.map(author => ({
+          name: author.name || '',
+          links: author.links || ''
+        }));
+        const authorsList = defaultAuthors.map(author => author.name).join('、');
+        Message.info(`当前作者信息为空，使用默认作者：${authorsList}`);
       }
     }
   }
@@ -953,28 +983,6 @@ function handleExport() {
   // 过滤掉空的作者信息
   const validAuthors = exportAuthors.value.filter(author => author.name.trim() !== '');
   
-  // 保存当前填写的作者为预设
-  if (validAuthors && validAuthors.length > 0) {
-    const preAuthorsString = JSON.stringify(
-        (preAuthors || []).map(a => ({
-          name: a.name ? a.name.trim() : '',
-          links: a.links ? a.links.trim() : ''
-        })).sort((a, b) => a.name.localeCompare(b.name))
-    );
-
-    const validAuthorsString = JSON.stringify(
-        validAuthors.map(a => ({
-          name: a.name ? a.name.trim() : '',
-          links: a.links ? a.links.trim() : ''
-        })).sort((a, b) => a.name.localeCompare(b.name))
-    );
-
-    if (preAuthorsString !== validAuthorsString) {
-      preAuthors = validAuthors;
-      saveLocal("_preAuthors", { preAuthors });
-    }
-  }
-
   let data = {
     info: {
       name: polyline.name,
@@ -2135,6 +2143,12 @@ function formatNumber(num) {
                   style="flex: 1;"
               />
               <a-button
+                  @click="handlePresetAuthor('open', index)"
+                  size="small"
+              >
+                选择作者
+              </a-button>
+              <a-button
                   @click="removeAuthor(index)"
                   size="small"
                   status="danger"
@@ -2166,6 +2180,40 @@ function formatNumber(num) {
         <a-textarea v-model="exportDescription" placeholder="请输入描述" :auto-size="{ minRows: 3, maxRows: 5 }"/>
       </a-form-item>
     </a-form>
+  </a-modal>
+
+  <!-- 选择预设作者 -->
+  <a-modal
+      v-model:visible="showAuthorSelectModal"
+      title="预设作者列表"
+      @ok="handlePresetAuthor('save')"
+      @cancel="showAuthorSelectModal = false"
+      :width="500"
+      okText="保存"
+  >
+    <a-space direction="vertical" fill>
+      <template v-for="(author, index) in preAuthors" :key="index">
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+            <a-input v-model="author.name" :placeholder="`作者 ${index + 1} 姓名`" size="small" style="flex: 1;"/>
+            <a-checkbox :value="true" v-model="author.def">默认</a-checkbox>
+            <a-button @click="handlePresetAuthor('select', author)" size="small" :disabled="!author.name">选择</a-button>
+            <a-button
+                @click="handlePresetAuthor('delete', index)"
+                size="small"
+                status="danger"
+                :disabled="preAuthors.length === 1 && !preAuthors[0].name && !preAuthors[0].links"
+            >
+              删除
+            </a-button>
+          </div>
+          <a-input v-model="author.links" :placeholder="`作者 ${index + 1} 链接（可选）`" size="small"/>
+        </div>
+      </template>
+      <a-button @click="handlePresetAuthor('add')" type="dashed" size="small" style="width: 100%;">
+        + 添加作者
+      </a-button>
+    </a-space>
   </a-modal>
 
   <!-- 新增：文件选择对话框 -->
