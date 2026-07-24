@@ -91,7 +91,7 @@ const MAPS = {
     gameMapUpRows: 3,
     gameMapLeftCols: 10,
     displayName: '霜月',
-    source: 'public/MoonCanon_1024.png',
+    source: 'public/MoonCanon_1024.jpg',
     enableTiles: true,
     tileSize: 512,
     quality: 80,
