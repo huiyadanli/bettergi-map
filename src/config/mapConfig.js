@@ -85,6 +85,17 @@ const MAPS = {
     tileSize: 512,
     quality: 80,
   },
+  MoonCanon: {
+    gameMapRows: 9,
+    gameMapCols: 17,
+    gameMapUpRows: 3,
+    gameMapLeftCols: 10,
+    displayName: '霜月',
+    source: 'public/MoonCanon_1024.jpg',
+    enableTiles: true,
+    tileSize: 512,
+    quality: 80,
+  },
 };
 
 const runtimeMeta = typeof window !== 'undefined' ? window.__TILE_META__ : null;
