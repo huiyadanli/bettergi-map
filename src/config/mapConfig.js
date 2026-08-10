@@ -20,9 +20,9 @@ function getPixelScale(source) {
 
 const MAPS = {
   Teyvat: {
-    gameMapRows: 15,
+    gameMapRows: 19,
     gameMapCols: 22,
-    gameMapUpRows: 7,
+    gameMapUpRows: 11,
     gameMapLeftCols: 15,
     displayName: '提瓦特大陆',
     source: 'public/1024_map.jpg',
