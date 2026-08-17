@@ -38,3 +38,7 @@
   padding: 1px !important;
   font-size: 16px !important;
 }
+
+.highlight-marker {
+  z-index: 1000;
+}

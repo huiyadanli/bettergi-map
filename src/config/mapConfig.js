@@ -18,6 +18,20 @@ function getPixelScale(source) {
   return 1;
 }
 
+function createLayeredMap(source, referenceWidth, referenceHeight) {
+  return {
+    source,
+    format: 'webp',
+    quality: 80,
+    referenceWidth,
+    referenceHeight,
+    pane: 'layeredMapPane',
+    backgroundMaskColor: '#000000',
+    backgroundMaskOpacity: 0.666666687,
+    greyedLayerBrightness: 0.564705908,
+  };
+}
+
 const MAPS = {
   Teyvat: {
     gameMapRows: 19,
@@ -29,6 +43,7 @@ const MAPS = {
     enableTiles: true,
     tileSize: 512,
     quality: 80,
+    layeredMap: createLayeredMap('public/layers/Teyvat', 22528, 19456),
   },
   TheChasm: {
     gameMapRows: 2,
@@ -62,6 +77,7 @@ const MAPS = {
     enableTiles: true,
     tileSize: 512,
     quality: 80,
+    layeredMap: createLayeredMap('public/layers/SeaOfBygoneEras', 4096, 3072),
   },
   AncientSacredMountain: {
     gameMapRows: 4,
@@ -73,6 +89,7 @@ const MAPS = {
     enableTiles: true,
     tileSize: 512,
     quality: 80,
+    layeredMap: createLayeredMap('public/layers/AncientSacredMountain', 4096, 4096),
   },
   TempleOfSpace: {
     gameMapRows: 4,
@@ -84,6 +101,7 @@ const MAPS = {
     enableTiles: true,
     tileSize: 512,
     quality: 80,
+    layeredMap: createLayeredMap('public/layers/TempleOfSpace', 3072, 4096),
   },
   MoonCanon: {
     gameMapRows: 9,
@@ -95,6 +113,7 @@ const MAPS = {
     enableTiles: true,
     tileSize: 512,
     quality: 80,
+    layeredMap: createLayeredMap('public/layers/MoonCanon', 17408, 9216),
   },
 };
 
@@ -107,6 +126,9 @@ for (const [name, map] of Object.entries(MAPS)) {
   map.meta = runtimeMeta?.[name] || null;
   map.tileDir = `./tiles/${name}`;
   map.mapImage = map.source.replace(/^public\//, './');
+  if (map.layeredMap) {
+    map.layeredMap.imageDir = map.layeredMap.source.replace(/^public\//, './');
+  }
 }
 
 export { MAPS };
