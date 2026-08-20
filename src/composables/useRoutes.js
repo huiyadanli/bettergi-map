@@ -25,14 +25,40 @@ import {
   curUpdatrowIndex,
 } from '../stores/editor';
 import {switchMap} from './useMap';
-import {snapshotPolyline} from './useHistory';
+import {snapshotPolyline, ensureHistoryRoute} from './useHistory';
+
+const ROUTE_STYLE = Object.freeze({
+  color: '#ff5964',
+  weight: 3,
+  opacity: 0.92,
+  lineCap: 'round',
+  lineJoin: 'round',
+  pane: 'routePane',
+});
+
+function refreshRouteStyles() {
+  polylines.value.forEach((route, index) => {
+    if (typeof route.layer?.setStyle !== 'function') return;
+    const active = index === selectedPolylineIndex.value;
+    route.layer.setStyle({
+      ...ROUTE_STYLE,
+      color: active ? ROUTE_STYLE.color : '#ff9da4',
+      weight: active ? 3.5 : 2.5,
+      opacity: active ? 0.94 : 0.42,
+    });
+  });
+}
 
 /**
  * 移除当前选中点的高亮标记。
  */
 export function removeHighlightMarker() {
   if (highlightMarker.value) {
-    map.value.removeLayer(highlightMarker.value);
+    // The map can be torn down while a marker reference is still present
+    // (for example during a map switch).  Removing it should be idempotent.
+    if (typeof map.value?.removeLayer === 'function') {
+      map.value.removeLayer(highlightMarker.value);
+    }
     highlightMarker.value = null;
   }
 }
@@ -49,12 +75,15 @@ export function handleMapPointChange(e) {
  * 按当前点位数组重绘折线并重排序号。
  */
 export function updateMapFromPolyLine(polyline) {
+  if (!polyline || !Array.isArray(polyline.positions)) return;
   polyline.positions.forEach((item, index) => item.id = index + 1);
   const latlngs = polyline.positions.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
-  polyline.layer.setLatLngs(latlngs);
+  if (typeof polyline.layer?.setLatLngs === 'function') {
+    polyline.layer.setLatLngs(latlngs);
+  }
 }
 
 /**
@@ -82,6 +111,7 @@ export function updatePosition(polylineIndex, positionIndex, key, value) {
  * 把 Leaflet 折线转成路线；有锁定行时插入到锁定位置。
  */
 export function addPolyline(layer, name = '未命名路径') {
+  layer?.setStyle?.(ROUTE_STYLE);
   const newPositions = layer.getLatLngs().map((latlng, index) => {
     const gamePos = coordinateConverter.value.main1024ToGame(latlng.lng, latlng.lat);
     return {
@@ -123,11 +153,7 @@ export function addPolyline(layer, name = '未命名路径') {
     }
   }
 
-  selectedPointIndex.value = -1;
-  if (highlightMarker.value) {
-    map.value.removeLayer(highlightMarker.value);
-    highlightMarker.value = null;
-  }
+  clearSelection();
 
   const newPolyline = {
     name: name,
@@ -142,6 +168,7 @@ export function addPolyline(layer, name = '未命名路径') {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  refreshRouteStyles();
   snapshotPolyline();
   selectPolyline(selectedPolylineIndex.value);
 }
@@ -177,9 +204,7 @@ function createImportedPolyline(importedData, filePath, processedInfo) {
     return L.latLng(main1024Pos.y, main1024Pos.x);
   });
   const layer = L.polyline(positions, {
-    color: 'red',
-    weight: 3,
-    pane: 'routePane',
+    ...ROUTE_STYLE,
   }).addTo(map.value);
   layer.on('pm:edit', handleMapPointChange);
 
@@ -205,6 +230,7 @@ function createImportedPolyline(importedData, filePath, processedInfo) {
   };
   polylines.value.push(newPolyline);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  refreshRouteStyles();
   snapshotPolyline();
   selectPolyline(selectedPolylineIndex.value);
 }
@@ -301,18 +327,49 @@ export function updatePolyline(layer) {
  * 选中一条路线并把地图中心移到该折线。
  */
 export function selectPolyline(index) {
-  snapshotPolyline();
+  const nextPolyline = polylines.value[index];
+  if (!nextPolyline) {
+    selectedPolylineIndex.value = -1;
+    clearSelection();
+    ensureHistoryRoute();
+    return;
+  }
+
+  const changed = selectedPolylineIndex.value !== index
+    || polylines.value[selectedPolylineIndex.value] !== nextPolyline;
   selectedPolylineIndex.value = index;
+  refreshRouteStyles();
+  if (changed) {
+    // A point index/highlight belongs to the previously selected route.
+    // Carrying it over makes the table and map disagree after a route switch.
+    clearSelection();
+  }
+  // Ensure the undo stack is associated with the newly selected route before
+  // taking a snapshot.  This also prevents an undo on route B from restoring
+  // a snapshot that belongs to route A.
+  ensureHistoryRoute();
+  snapshotPolyline();
+
+  if (!map.value || typeof map.value.setView !== 'function'
+    || typeof nextPolyline.layer?.getBounds !== 'function') return;
   const meta = currentMapConfig.value.meta;
   const maxZoom = meta ? meta.maxTileZoom : 5;
   const targetZoom = maxZoom + 1;
-  map.value.setView(polylines.value[index].layer.getBounds().getCenter(), Math.max(map.value.getZoom(), targetZoom));
+  const bounds = nextPolyline.layer.getBounds();
+  const boundsValid = bounds && (typeof bounds.isValid !== 'function' || bounds.isValid());
+  if (boundsValid) {
+    const currentZoom = typeof map.value.getZoom === 'function' ? map.value.getZoom() : targetZoom;
+    map.value.setView(bounds.getCenter(), Math.max(currentZoom, targetZoom));
+  }
 }
 
 /**
  * 确认后删除一条路线（只删页面显示，不删本地文件）。
  */
 export function deletePolyline(index) {
+  const targetPolyline = polylines.value[index];
+  if (!targetPolyline) return;
+
   Modal.confirm({
     title: '确认删除',
     content: '确定要删除该路线吗？此操作不可撤销。（仅删除当前页面显示，已存在的本地文件不会被删除）',
@@ -320,10 +377,59 @@ export function deletePolyline(index) {
     okButtonProps: {status: 'danger'},
     cancelText: '取消',
     onOk: () => {
-      map.value.removeLayer(polylines.value[index].layer);
-      polylines.value.splice(index, 1);
-      if (selectedPolylineIndex.value >= polylines.value.length) {
-        selectedPolylineIndex.value = Math.max(0, polylines.value.length - 1);
+      const routeCount = polylines.value.length;
+      // Resolve the route again in case another operation changed the list
+      // while the confirmation dialog was open.
+      const targetIndex = polylines.value.indexOf(targetPolyline);
+      if (targetIndex < 0 || targetIndex >= routeCount) return;
+      const polyline = polylines.value[targetIndex];
+
+      const previousSelectedIndex = selectedPolylineIndex.value;
+      const deletingSelected = previousSelectedIndex === targetIndex;
+
+      map.value?.removeLayer(polyline.layer);
+      polylines.value.splice(targetIndex, 1);
+
+      if (polylines.value.length === 0) {
+        selectedPolylineIndex.value = -1;
+        clearSelection();
+        ensureHistoryRoute();
+        return;
+      }
+
+      let nextSelectedIndex = previousSelectedIndex;
+      if (deletingSelected) {
+        // Prefer the route that shifted into the removed route's slot, or the
+        // previous last route when the removed item was at the end.
+        nextSelectedIndex = Math.min(targetIndex, polylines.value.length - 1);
+      } else if (previousSelectedIndex > targetIndex) {
+        // Removing an item before the current selection shifts its index left.
+        nextSelectedIndex = previousSelectedIndex - 1;
+      }
+
+      // If the old selection was already invalid, recover to a valid route
+      // whenever one exists instead of leaving a stale index behind.
+      if (nextSelectedIndex < 0 || nextSelectedIndex >= polylines.value.length) {
+        nextSelectedIndex = Math.min(Math.max(targetIndex, 0), polylines.value.length - 1);
+      }
+
+      selectedPolylineIndex.value = nextSelectedIndex;
+      refreshRouteStyles();
+      if (deletingSelected || previousSelectedIndex < 0 || previousSelectedIndex >= routeCount) {
+        clearSelection();
+        ensureHistoryRoute();
+        const nextPolyline = polylines.value[nextSelectedIndex];
+        if (map.value && typeof map.value.setView === 'function'
+          && typeof nextPolyline?.layer?.getBounds === 'function') {
+          const bounds = nextPolyline.layer.getBounds();
+          const boundsValid = bounds && (typeof bounds.isValid !== 'function' || bounds.isValid());
+          if (boundsValid) {
+            const meta = currentMapConfig.value.meta;
+            const targetZoom = (meta ? meta.maxTileZoom : 5) + 1;
+            const currentZoom = typeof map.value.getZoom === 'function' ? map.value.getZoom() : targetZoom;
+            map.value.setView(bounds.getCenter(), Math.max(currentZoom, targetZoom));
+          }
+        }
       }
     }
   });
@@ -422,16 +528,25 @@ export function setPositionRowClass(record, rowIndex) {
  */
 export function deletePosition(index) {
   const polyline = polylines.value[selectedPolylineIndex.value];
+  if (!polyline || !Array.isArray(polyline.positions) || index < 0 || index >= polyline.positions.length) {
+    // A stale table event can arrive after its route was removed or cleared.
+    // It must not leave a point selected on a route that no longer owns it.
+    if (!polyline || polyline.positions?.length === 0
+      || selectedPointIndex.value >= (polyline.positions?.length ?? 0)) {
+      clearSelection();
+    }
+    return;
+  }
+
   polyline.positions.splice(index, 1);
 
-  if (selectedPointIndex.value === index) {
-    selectedPointIndex.value = -1;
-    if (highlightMarker.value) {
-      map.value.removeLayer(highlightMarker.value);
-      highlightMarker.value = null;
-    }
+  if (selectedPointIndex.value === index || polyline.positions.length === 0) {
+    clearSelection();
   } else if (selectedPointIndex.value > index) {
     selectedPointIndex.value -= 1;
+  } else if (selectedPointIndex.value < 0 && highlightMarker.value) {
+    // A marker without a corresponding selected row is stale as well.
+    clearSelection();
   }
 
   updateMapFromPolyLine(polyline);
@@ -457,8 +572,16 @@ export function clearPoints() {
     okText: '确认',
     cancelText: '取消',
     onOk: () => {
-      if (polylines.value[selectedPolylineIndex.value]) {
-        polylines.value[selectedPolylineIndex.value].positions = [];
+      const polyline = polylines.value[selectedPolylineIndex.value];
+      if (polyline) {
+        polyline.positions = [];
+        updateMapFromPolyLine(polyline);
+        clearSelection();
+        snapshotPolyline();
+      } else {
+        // Keep selection state consistent even if the route was removed while
+        // the confirmation dialog was open.
+        clearSelection();
       }
     },
     onCancel: () => {
@@ -483,9 +606,7 @@ export function addNewPoint(x, y) {
 
   if (selectedPolylineIndex.value === -1 || polylines.value.length === 0) {
     const layer = L.polyline([L.latLng(main1024Pos.y, main1024Pos.x)], {
-      color: 'red',
-      weight: 3,
-      pane: 'routePane',
+      ...ROUTE_STYLE,
     }).addTo(map.value);
     map.value.setZoom(2);
     layer.on('pm:edit', handleMapPointChange);
@@ -522,22 +643,24 @@ export function handleAddPointFromModal() {
  * 选中一个点，在地图上加高亮并居中。
  */
 export function selectPoint(record) {
-  if (highlightMarker.value) {
-    map.value.removeLayer(highlightMarker.value);
-    highlightMarker.value = null;
+  const polyline = polylines.value[selectedPolylineIndex.value];
+  const actualIndex = polyline?.positions?.findIndex((pos) => pos === record) ?? -1;
+  if (!polyline || actualIndex < 0 || !record) {
+    clearSelection();
+    return;
   }
 
-  const polyline = polylines.value[selectedPolylineIndex.value];
-  const actualIndex = polyline.positions.findIndex((pos) => pos === record);
+  removeHighlightMarker();
 
   selectedPointIndex.value = actualIndex;
 
   const main1024Pos = coordinateConverter.value.gameToMain1024(record.x, record.y);
 
+  if (!map.value) return;
   highlightMarker.value = L.marker([main1024Pos.y, main1024Pos.x], {
     icon: L.divIcon({
       className: 'highlight-marker',
-      html: '<div style="background-color: #ff3333; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>',
+      html: '<div style="background-color: #ff5964; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 4px rgb(255 89 100 / 24%), 0 2px 6px rgb(35 48 67 / 30%);"></div>',
       iconSize: [16, 16],
       iconAnchor: [8, 8]
     })
@@ -552,31 +675,83 @@ export function selectPoint(record) {
  * 清除点位选中态和高亮。
  */
 export function clearSelection() {
-  if (highlightMarker.value) {
-    map.value.removeLayer(highlightMarker.value);
-    highlightMarker.value = null;
-  }
-
+  removeHighlightMarker();
   selectedPointIndex.value = -1;
 }
 
 /**
- * 把所有路线的点位合并到第一条。
+ * 按给定顺序创建一条合并路线。
+ *
+ * 默认保留源路线；只有显式传入 removeSources 才移除本次选中的源路线。
+ * 未选中的路线不受影响。
  */
-export function mergedPolyline() {
-  const newPos = [];
-  polylines.value.forEach((polyline) => {
-    polyline.positions.forEach((p) => {
-      newPos[newPos.length] = p;
-    });
-  });
-  polylines.value[0].positions = newPos;
-  for (let i = 1; i < polylines.value.length; i++) {
-    map.value.removeLayer(polylines.value[i].layer);
+export function mergePolylines(routes, name, removeSources = false) {
+  const sourceRoutes = routes.filter((route, index, list) => (
+    polylines.value.includes(route) && list.indexOf(route) === index
+  ));
+  const mergedName = String(name || '').trim();
+
+  if (sourceRoutes.length < 2) {
+    Message.warning('请至少选择两条路线');
+    return false;
   }
-  polylines.value = [polylines.value[0]];
-  updateMapFromPolyLine(polylines.value[0]);
-  selectPolyline(0);
+  if (!mergedName) {
+    Message.warning('请填写合并后的路线名称');
+    return false;
+  }
+
+  const cloneData = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
+  const positions = sourceRoutes.flatMap((route) => cloneData(route.positions || []));
+  positions.forEach((position, index) => {
+    position.id = index + 1;
+  });
+
+  const firstRoute = sourceRoutes[0];
+  const info = cloneData(firstRoute.info || {});
+  info.name = mergedName;
+
+  const latlngs = positions.map((position) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(position.x, position.y);
+    return L.latLng(main1024Pos.y, main1024Pos.x);
+  });
+  const layer = L.polyline(latlngs, {...ROUTE_STYLE}).addTo(map.value);
+  layer.on('pm:edit', handleMapPointChange);
+
+  const mergedRoute = {
+    name: mergedName,
+    tags: cloneData(firstRoute.tags || []),
+    enable_monster_loot_split: !!firstRoute.enable_monster_loot_split,
+    map_match_method: firstRoute.map_match_method || '',
+    layer,
+    positions,
+    info,
+  };
+
+  clearSelection();
+
+  if (removeSources) {
+    const sourceSet = new Set(sourceRoutes);
+    const sourceIndexes = sourceRoutes
+      .map((route) => polylines.value.indexOf(route))
+      .filter((index) => index >= 0);
+    const insertIndex = Math.min(...sourceIndexes);
+
+    sourceRoutes.forEach((route) => map.value?.removeLayer(route.layer));
+    const remainingRoutes = polylines.value.filter((route) => !sourceSet.has(route));
+    remainingRoutes.splice(insertIndex, 0, mergedRoute);
+    polylines.value = remainingRoutes;
+    selectedPolylineIndex.value = insertIndex;
+  } else {
+    polylines.value.push(mergedRoute);
+    selectedPolylineIndex.value = polylines.value.length - 1;
+  }
+
+  refreshRouteStyles();
+  ensureHistoryRoute();
+  snapshotPolyline();
+  selectPolyline(selectedPolylineIndex.value);
+  Message.success(`已创建“${mergedName}”，共 ${positions.length} 个点位`);
+  return true;
 }
 
 /**
@@ -626,14 +801,13 @@ export function addSpliePolyline(importedData) {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
     return L.latLng(main1024Pos.y, main1024Pos.x);
   }), {
-    color: 'red',
-    weight: 3,
-    pane: 'routePane',
+    ...ROUTE_STYLE,
   }).addTo(map.value);
   layer.on('pm:edit', handleMapPointChange);
   importedData.layer = layer;
   polylines.value.push(importedData);
   selectedPolylineIndex.value = polylines.value.length - 1;
+  refreshRouteStyles();
   snapshotPolyline();
 }
 
@@ -691,8 +865,12 @@ export function runFromPoint(rowIndex) {
     data.info.bgi_version = polyline.oldFileData.info.bgi_version;
   }
   data = deepMerge(polyline.oldFileData || {}, data);
+  const fileAccessBridge = globalThis.chrome?.webview?.hostObjects?.mapEditorWebBridge;
+  if (!fileAccessBridge?.RunPathing) {
+    Message.info('“从此处运行”需要在 BetterGI 地图编辑器中使用');
+    return;
+  }
   try {
-    const fileAccessBridge = chrome.webview.hostObjects.mapEditorWebBridge;
     fileAccessBridge.RunPathing(JSONStringifyOrdered(data, 2));
     Message.success(`已从第 ${rowIndex + 1} 个点位开始运行`);
   } catch (error) {

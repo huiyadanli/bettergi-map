@@ -30,7 +30,6 @@ function handleKeyDown(e) {
  * 在页面根组件中启动编辑器会话。
  */
 export function useEditorLifecycle() {
-  console.log('vue');
   bindMapRouteHandlers({
     onPolylineCreate: addPolyline,
     onMapPointChange: handleMapPointChange,

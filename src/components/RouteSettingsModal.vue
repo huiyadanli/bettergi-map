@@ -44,7 +44,27 @@ import {saveCommonTagManagerModal, commonTagChange} from '../composables/useRout
   padding-top: 4px;
 }
 
+.settings-form :deep(.arco-input-tag),
+.settings-form :deep(.arco-select) {
+  width: 100%;
+}
+
+.settings-form :deep(.arco-form-item-content) {
+  min-width: 0;
+}
+
 .settings-form :deep(.arco-form-item:last-child) {
   margin-bottom: 0;
+}
+
+@media (max-width: 560px) {
+  .settings-form :deep(.arco-form-item) {
+    display: block;
+  }
+
+  .settings-form :deep(.arco-form-item-label) {
+    width: auto !important;
+    margin-bottom: 6px;
+  }
 }
 </style>

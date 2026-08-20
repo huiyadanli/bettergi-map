@@ -41,6 +41,7 @@ import {savePointExtParams} from '../composables/usePointExtParams';
         <a-select v-model="pointExtParams.misidentification.handling_mode" placeholder="请选择处理方式" allow-clear>
           <a-option value="previousDetectedPoint">取上一个识别到的点位置</a-option>
           <a-option value="mapRecognition">大地图识别</a-option>
+          <a-option value="scheduledArrival">按特定时间到达</a-option>
         </a-select>
       </a-form-item>
 
@@ -63,6 +64,18 @@ import {savePointExtParams} from '../composables/usePointExtParams';
   padding-top: 4px;
 }
 
+.ext-params-form :deep(.arco-form-item-content),
+.ext-params-form :deep(.arco-select),
+.ext-params-form :deep(.arco-input-number),
+.ext-params-form :deep(.arco-textarea-wrapper) {
+  min-width: 0;
+  width: 100%;
+}
+
+.ext-params-form :deep(.arco-form-item) {
+  margin-bottom: 14px;
+}
+
 .ext-params-form :deep(.arco-divider) {
   margin: 12px 0 20px;
   color: var(--color-text-2);
@@ -71,5 +84,16 @@ import {savePointExtParams} from '../composables/usePointExtParams';
 
 .ext-params-form :deep(.arco-form-item:last-child) {
   margin-bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .ext-params-form :deep(.arco-form-item) {
+    display: block;
+  }
+
+  .ext-params-form :deep(.arco-form-item-label) {
+    width: auto !important;
+    margin-bottom: 6px;
+  }
 }
 </style>

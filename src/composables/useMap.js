@@ -19,7 +19,11 @@ import {
   imageHeight,
   map,
   polylines,
+  selectedPolylineIndex,
+  selectedPointIndex,
+  highlightMarker,
 } from '../stores/editor';
+import {resetHistory} from './useHistory';
 
 // 画完折线后交给路线模块建档
 let onPolylineCreate = null;
@@ -143,7 +147,18 @@ export async function initMap() {
 
   map.value = L.map('map', {
     attributionControl: false,
+    zoomControl: false,
     crs,
+    // Keep wheel / pinch zoom continuous instead of snapping every gesture
+    // to an integer tile level.  The tile layer still reuses the nearest
+    // native level, so this adds smooth navigation without requesting
+    // fractional tile paths.
+    zoomSnap: 0,
+    zoomDelta: 0.25,
+    wheelPxPerZoomLevel: 90,
+    zoomAnimation: true,
+    fadeAnimation: true,
+    markerZoomAnimation: true,
     minZoom: useTiles ? 0 : -4,
     maxZoom: useTiles ? meta.maxTileZoom + 4 : 5,
     maxBounds: [[0, 0], [h, w]],
@@ -191,6 +206,16 @@ export async function initMap() {
   map.value.fitBounds([[0, 0], [h, w]]);
   map.value.setZoom(1);
 
+  // Leaflet's built-in zoom control is recreated here so its labels are
+  // localised and its appearance can be styled alongside Geoman controls.
+  L.control.zoom({
+    position: 'topleft',
+    zoomInText: '+',
+    zoomOutText: '−',
+    zoomInTitle: '放大地图',
+    zoomOutTitle: '缩小地图',
+  }).addTo(map.value);
+
   map.value.pm.addControls({
     position: 'topleft',
     drawMarker: false,
@@ -209,10 +234,26 @@ export async function initMap() {
 
   map.value.pm.setLang('zh');
 
+  // Geoman does not expose labels for its icon-only buttons. Add an
+  // accessible name and a stable hook for the visual treatment.
+  const pmButtons = map.value.getContainer().querySelectorAll(
+    '.leaflet-pm-toolbar .leaflet-buttons-control-button',
+  );
+  pmButtons.forEach((button) => {
+    const icon = button.querySelector('.leaflet-pm-icon-polyline, .leaflet-pm-icon-edit');
+    const isEdit = icon?.classList.contains('leaflet-pm-icon-edit');
+    const label = isEdit ? '编辑路线点位' : '绘制路线';
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+  });
+
   map.value.pm.setGlobalOptions({
     pathOptions: {
-      color: 'red',
+      color: '#ff5964',
       weight: 3,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
       pane: 'routePane',
     }
   });
@@ -235,6 +276,17 @@ export async function switchMap(mapName) {
   coordinateConverter.value = new CoordinateConverter(currentMapConfig.value);
 
   polylines.value = [];
+  selectedPolylineIndex.value = -1;
+  selectedPointIndex.value = -1;
+  if (highlightMarker.value) {
+    if (typeof map.value?.removeLayer === 'function') {
+      map.value.removeLayer(highlightMarker.value);
+    }
+    highlightMarker.value = null;
+  }
+  // Routes are discarded as part of a map switch; their undo snapshots must
+  // not become available for the next map's first route.
+  resetHistory();
   if (map.value) {
     map.value.eachLayer((layer) => {
       if (layer instanceof L.Polyline || layer instanceof L.Marker) {

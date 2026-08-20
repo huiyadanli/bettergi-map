@@ -10,14 +10,14 @@ export const MAX_HISTORY = 50;
 // 战斗策略本地存储键
 export const COMBAT_SCRIPT_KEY = '_combatScriptData';
 
-// 点位表格基础列，single 模式会在前面插入运行列
+// 点位表格基础列；运行列由 editor store 统一插入。
 export const columnsBase = [
-  {title: '#', dataIndex: 'id', slotName: 'id'},
-  {title: '坐标', dataIndex: 'xy', slotName: 'xy'},
-  {title: '类型', dataIndex: 'type', slotName: 'type'},
-  {title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode'},
-  {title: '动作', dataIndex: 'action', slotName: 'action'},
-  {title: '操作', slotName: 'operations'},
+  {title: '#', dataIndex: 'id', slotName: 'id', width: 52},
+  {title: '坐标', dataIndex: 'xy', slotName: 'xy', width: 146},
+  {title: '类型', dataIndex: 'type', slotName: 'type', width: 100},
+  {title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode', width: 112},
+  {title: '动作', dataIndex: 'action', slotName: 'action', width: 250},
+  {title: '操作', slotName: 'operations', width: 108, fixed: 'right'},
 ];
 
 // 点位动作级联选项
