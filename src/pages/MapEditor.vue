@@ -15,6 +15,7 @@ import CombatScriptModals from '../components/CombatScriptModals.vue';
 import PointExtParamsModal from '../components/PointExtParamsModal.vue';
 import RouteSettingsModal from '../components/RouteSettingsModal.vue';
 import PointCoordModals from '../components/PointCoordModals.vue';
+import RouteMergeModal from '../components/RouteMergeModal.vue';
 import {useEditorLifecycle} from '../composables/useEditorLifecycle';
 
 useEditorLifecycle();
@@ -25,16 +26,28 @@ useEditorLifecycle();
     <template #map>
       <MapPane/>
     </template>
-    <a-space direction="vertical" size="large" fill>
+    <div class="editor-panels">
       <RouteListCard/>
       <PointTableCard/>
-    </a-space>
+    </div>
   </AppLayout>
   <PointExtParamsModal/>
   <CombatScriptModals/>
   <RouteSettingsModal/>
   <PointCoordModals/>
+  <RouteMergeModal/>
   <ExportModal/>
   <AuthorSelectModal/>
   <FileSelectModal/>
 </template>
+
+<style scoped>
+.editor-panels {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  gap: 10px;
+  min-height: 0;
+}
+</style>

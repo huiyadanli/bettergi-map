@@ -123,13 +123,11 @@ export const isAllSelected = computed(() => {
   return jsonFiles.length > 0 && selectedJsonFileCount.value === jsonFiles.length;
 });
 
-// 点位表列定义，single 模式多一列运行按钮
-export const columns = computed(() => {
-  if (mode === 'single') {
-    return [{title: '', dataIndex: 'play', slotName: 'play'}, ...columnsBase];
-  }
-  return columnsBase;
-});
+// 点位表列定义；运行入口在开发页与 BetterGI 内保持一致。
+export const columns = computed(() => [
+  {title: '', dataIndex: 'play', slotName: 'play', width: 52, fixed: 'left'},
+  ...columnsBase,
+]);
 
 // 战斗策略列表
 export const combatScriptData = ref(loadLocal(COMBAT_SCRIPT_KEY) || []);
@@ -164,6 +162,9 @@ export const polylineTagsSelectIndex = ref(-1);
 
 // 是否显示编辑点位坐标弹窗
 export const showEditPointModal = ref(false);
+
+// 是否显示路线合并面板
+export const showRouteMergeModal = ref(false);
 
 // 正在编辑的点位记录
 export const curUpdatePosition = ref({});

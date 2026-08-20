@@ -72,6 +72,21 @@ export async function enterDirectory(dirPath) {
 }
 
 /**
+ * 重新列举当前目录，供文件选择器刷新快捷键使用。
+ */
+export async function refreshCurrentDirectory() {
+  try {
+    const fileAccessBridge = chrome.webview.hostObjects.fileAccessBridge;
+    const itemsJson = await fileAccessBridge.ListItems(currentPath.value);
+    availableFiles.value = JSON.parse(itemsJson);
+    selectedFiles.value = [];
+  } catch (error) {
+    console.error('刷新目录失败:', error);
+    Message.error('刷新目录失败: ' + error.message);
+  }
+}
+
+/**
  * 返回上一级目录。
  */
 export async function goBack() {
@@ -93,24 +108,19 @@ export async function goBack() {
 /**
  * 回到根目录并重新列举。
  */
-export function resetToRoot() {
+export async function resetToRoot() {
   currentPath.value = '';
   pathHistory.value = [];
-  importFromFileAccessBridge();
+  await refreshCurrentDirectory();
 }
 
 /**
- * 全选或取消全选当前目录条目。
+ * 全选当前目录内可导入的 JSON 文件。
  */
-export async function selectAll() {
-  console.log(availableFiles.value, selectedFiles.value);
-  if (availableFiles.value.length === selectedFiles.value.length) {
-    console.log('取消全选');
-    selectedFiles.value = [];
-  } else {
-    console.log('全选');
-    selectedFiles.value = availableFiles.value.map((item) => item.RelativePath);
-  }
+export function selectAll() {
+  selectedFiles.value = availableFiles.value
+    .filter(isJsonFile)
+    .map((item) => item.RelativePath);
 }
 
 /**

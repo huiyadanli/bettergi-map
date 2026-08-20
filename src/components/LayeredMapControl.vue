@@ -18,8 +18,9 @@ const LAYER_CATALOGS = {
   MoonCanon: moonCanonLayerConfig,
 };
 
-// 分层图由控制器统一响应缩放事件。这样 Group 切换并重建 ImageOverlay 后，
-// 不依赖每个临时图层各自注册/注销 zoomanim，避免第二个 Group 丢失缩放监听。
+// 分层区域切换时会整批重建 ImageOverlay，因此由控制器持有唯一一组
+// 地图事件监听。事件处理必须同步执行，不能再延迟到下一帧，否则底图
+// 已经开始变换而分层图仍停留在上一帧，连续缩放时会明显脱节。
 const LayeredImageOverlay = L.ImageOverlay.extend({
   getEvents() {
     return {};
@@ -99,12 +100,18 @@ const groupSelectClass = computed(() => ({
   dense: (selectedGroupOption.value?.label.length || 0) > 13,
 }));
 const floorOptions = computed(() => floors.value
-  .map((floor) => ({
-    level: floor.floorLevel,
-    label: floor.label,
-    name: floor.areas.find((area) => String(area.id) === selectedGroupId.value)?.name,
-  }))
+  .map((floor) => {
+    const area = floor.areas.find((item) => String(item.id) === selectedGroupId.value);
+    return {
+      level: floor.floorLevel,
+      floorId: area?.floorId,
+      label: floor.label,
+      name: area?.name,
+    };
+  })
   .filter((floor) => floor.name));
+const selectedFloorId = computed(() => floorOptions.value
+  .find((floor) => floor.level === selectedFloorLevel.value)?.floorId ?? null);
 const visibleGroupOptions = computed(() => {
   if (groupSearch.value.trim() || !viewportReferenceBounds.value) return groupOptions.value;
   const [left, top, right, bottom] = viewportReferenceBounds.value;
@@ -135,7 +142,10 @@ let viewportMap = null;
 let overlayMap = null;
 let cachedGroupId = '';
 let cachedFloorLayers = new Map();
-let ignoreBlankClickUntil = 0;
+let cachedBackgroundLayers = new Map();
+let tileTransformObserver = null;
+let overlayResetTimer = 0;
+let overlayGeometryZoom = null;
 
 function imageBounds(bounds) {
   const config = currentMapConfig.value.layeredMap;
@@ -148,13 +158,26 @@ function imageBounds(bounds) {
 }
 
 function refreshViewportBounds() {
+  // The map ref is assigned immediately after `L.map()` is created, before
+  // initMap() has called fitBounds/setView. Leaflet cannot answer getBounds()
+  // during that short window, so wait for its loaded state instead of letting
+  // the control's watcher throw and abort the component update.
+  if (!map.value?._loaded) {
+    viewportReferenceBounds.value = null;
+    return;
+  }
   if (controlElement.value && map.value) {
     const {x: mapWidth, y: mapHeight} = map.value.getSize();
     controlElement.value.style.setProperty('--layered-map-floor-top', `${mapHeight / 2}px`);
     controlElement.value.style.setProperty(
-      '--layered-map-select-width',
-      `${Math.max(170, Math.min(340, mapWidth - 54))}px`,
+      '--layered-map-floor-max-height',
+      `${Math.max(120, mapHeight - 150)}px`,
     );
+    controlElement.value.style.setProperty(
+      '--layered-map-select-width',
+      `${Math.max(96, Math.min(320, mapWidth - 84))}px`,
+    );
+    controlElement.value.classList.toggle('is-narrow', mapWidth < 230);
   }
   if (!map.value || !imageWidth.value || !imageHeight.value || !currentMapConfig.value?.layeredMap) {
     viewportReferenceBounds.value = null;
@@ -175,28 +198,18 @@ function refreshViewportBounds() {
 function attachViewportListener() {
   if (viewportMap) {
     viewportMap.off('moveend zoomend resize', refreshViewportBounds);
-    viewportMap.off('zoomanim', animateCachedOverlays);
-    viewportMap.off('zoom viewreset', resetCachedOverlayGeometry);
-    viewportMap.off('click', closeModeOnBlankMapClick);
   }
   viewportMap = map.value;
   if (viewportMap) {
     viewportMap.on('moveend zoomend resize', refreshViewportBounds);
-    viewportMap.on('zoomanim', animateCachedOverlays);
-    viewportMap.on('zoom viewreset', resetCachedOverlayGeometry);
-    viewportMap.on('click', closeModeOnBlankMapClick);
   }
   refreshViewportBounds();
 }
 
-function closeModeOnBlankMapClick(event) {
-  if (!enabled.value || Date.now() < ignoreBlankClickUntil) return;
-  const target = event.originalEvent?.target;
-  if (target instanceof Element && target.closest(
-    '.leaflet-control, .leaflet-marker-icon, .leaflet-interactive, .layered-map-piece, '
-      + '.arco-trigger-popup, .arco-select-dropdown, .arco-select-option',
-  )) return;
-  enabled.value = false;
+function handleKeydown(event) {
+  if (event.key === 'Escape' && enabled.value && !event.defaultPrevented) {
+    enabled.value = false;
+  }
 }
 
 function removeCachedLayers() {
@@ -204,14 +217,24 @@ function removeCachedLayers() {
     for (const entries of cachedFloorLayers.values()) {
       for (const {overlay} of entries) overlay.removeFrom(overlayMap);
     }
+    for (const {entries} of cachedBackgroundLayers.values()) {
+      for (const {overlay} of entries) overlay.removeFrom(overlayMap);
+    }
   }
   cachedFloorLayers = new Map();
+  cachedBackgroundLayers = new Map();
   cachedGroupId = '';
 }
 
 function clearMode() {
+  tileTransformObserver?.disconnect();
+  tileTransformObserver = null;
+  if (overlayResetTimer) window.clearTimeout(overlayResetTimer);
+  overlayResetTimer = 0;
+  overlayGeometryZoom = null;
   removeCachedLayers();
   if (overlayMap) {
+    overlayMap.off('zoomanim', animateCachedOverlays);
     const container = overlayMap.getContainer();
     container.classList.remove('layered-map-mode');
     container.style.removeProperty('--layered-map-base-opacity');
@@ -219,7 +242,7 @@ function clearMode() {
   overlayMap = null;
 }
 
-function setOverlayState(overlay, visible, selected, stackIndex) {
+function setOverlayState(overlay, visible, selected, stackIndex, background = false) {
   const element = overlay.getElement();
   if (!element) return;
   const config = currentMapConfig.value.layeredMap;
@@ -227,19 +250,87 @@ function setOverlayState(overlay, visible, selected, stackIndex) {
   element.style.filter = selected ? 'none' : `brightness(${config.greyedLayerBrightness})`;
   element.style.zIndex = String(selected ? 1000 + stackIndex : stackIndex);
   element.classList.toggle('is-selected-layer', selected);
+  element.classList.toggle('is-background-group', background);
   element.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
 function animateCachedOverlays(event) {
-  for (const entries of cachedFloorLayers.values()) {
-    for (const {overlay} of entries) overlay._animateZoom(event);
+  if (!overlayMap || !Number.isFinite(event?.zoom)) return;
+  if (overlayResetTimer) {
+    window.clearTimeout(overlayResetTimer);
+    overlayResetTimer = 0;
   }
+  const baseZoom = Number.isFinite(overlayGeometryZoom)
+    ? overlayGeometryZoom
+    : overlayMap.getZoom();
+  const scale = overlayMap.getZoomScale(event.zoom, baseZoom);
+  for (const entries of cachedFloorLayers.values()) {
+    for (const {overlay} of entries) {
+      const element = overlay.getElement();
+      if (!element) continue;
+      const offset = overlayMap._latLngBoundsToNewLayerBounds(
+        overlay.getBounds(),
+        event.zoom,
+        event.center,
+      ).min;
+      L.DomUtil.setTransform(element, offset, scale);
+    }
+  }
+  for (const {entries} of cachedBackgroundLayers.values()) {
+    for (const {overlay} of entries) {
+      const element = overlay.getElement();
+      if (!element) continue;
+      const offset = overlayMap._latLngBoundsToNewLayerBounds(
+        overlay.getBounds(),
+        event.zoom,
+        event.center,
+      ).min;
+      L.DomUtil.setTransform(element, offset, scale);
+    }
+  }
+  overlayResetTimer = window.setTimeout(() => {
+    overlayResetTimer = 0;
+    resetCachedOverlayGeometry();
+  }, 280);
 }
 
 function resetCachedOverlayGeometry() {
   for (const entries of cachedFloorLayers.values()) {
     for (const {overlay} of entries) overlay._reset();
   }
+  for (const {entries} of cachedBackgroundLayers.values()) {
+    for (const {overlay} of entries) overlay._reset();
+  }
+  overlayGeometryZoom = overlayMap?._loaded ? overlayMap.getZoom() : null;
+}
+
+function attachTileTransformObserver() {
+  tileTransformObserver?.disconnect();
+  tileTransformObserver = null;
+  if (!overlayMap) return;
+  const tilePane = overlayMap.getPane('tilePane');
+  if (!tilePane) return;
+
+  // GridLayer 会先修改瓦片容器 transform，再由浏览器绘制下一帧。
+  // MutationObserver 在绘制前的同一微任务中触发，可让分层图采用完全
+  // 相同的目标中心和 zoom，避免经 requestAnimationFrame 后慢一帧。
+  tileTransformObserver = new MutationObserver((mutations) => {
+    const tileContainerChanged = mutations.some((mutation) => (
+      mutation.target instanceof Element
+      && mutation.target.classList.contains('leaflet-tile-container')
+    ));
+    if (!tileContainerChanged) return;
+    if (!overlayMap?._loaded || (cachedFloorLayers.size === 0 && cachedBackgroundLayers.size === 0)) return;
+    animateCachedOverlays({
+      center: overlayMap.getCenter(),
+      zoom: overlayMap.getZoom(),
+    });
+  });
+  tileTransformObserver.observe(tilePane, {
+    attributes: true,
+    subtree: true,
+    attributeFilter: ['style'],
+  });
 }
 
 function showSelectedFloor() {
@@ -250,12 +341,24 @@ function showSelectedFloor() {
       buildFloor(level, level === selectedLevel);
     }
   }
+  let stackIndex = 0;
+  const backgroundGroupIds = layerCatalog.value?.groups?.[selectedGroupId.value]?.backgroundGroupIds || [];
+  for (const groupId of backgroundGroupIds) {
+    const records = [...cachedBackgroundLayers.values()]
+      .filter((record) => String(record.groupId) === String(groupId))
+      .sort((a, b) => a.level - b.level);
+    for (const {entries} of records) {
+      for (const {overlay} of entries) setOverlayState(overlay, true, false, stackIndex, true);
+      stackIndex += 1;
+    }
+  }
   const orderedLevels = [...cachedFloorLayers.keys()].sort((a, b) => a - b);
-  orderedLevels.forEach((level, stackIndex) => {
+  orderedLevels.forEach((level) => {
     const visible = selectedLevel !== null;
     for (const {overlay} of cachedFloorLayers.get(level)) {
       setOverlayState(overlay, visible, level === selectedLevel, stackIndex);
     }
+    stackIndex += 1;
   });
 }
 
@@ -274,16 +377,9 @@ function layerImageUrl(id) {
   return `${config.imageDir}/UI_Map_LayeredMap_${id}.${config.format}`;
 }
 
-function buildFloor(level, highPriority = false) {
-  if (cachedFloorLayers.has(level) || !overlayMap) return;
-  const floor = floors.value.find((item) => item.floorLevel === level);
-  const layers = floor?.areas
-    .filter((area) => String(area.id) === selectedGroupId.value)
-    .flatMap((area) => area.layers) || [];
-  if (!layers.length) return;
-
+function createLayerEntries(layers, highPriority = false) {
   const config = currentMapConfig.value.layeredMap;
-  const entries = layers.map((layer) => {
+  return layers.map((layer) => {
     // 在设置 src 前声明优先级，并主动触发解码；切到后续楼层时不再临时解码大图。
     const image = new Image();
     image.fetchPriority = highPriority ? 'high' : 'auto';
@@ -303,7 +399,36 @@ function buildFloor(level, highPriority = false) {
     image.decode?.().catch(() => {});
     return {overlay, bounds: layer.bounds};
   });
+}
+
+function buildFloor(level, highPriority = false) {
+  if (cachedFloorLayers.has(level) || !overlayMap) return;
+  const floor = floors.value.find((item) => item.floorLevel === level);
+  const layers = floor?.areas
+    .filter((area) => String(area.id) === selectedGroupId.value)
+    .flatMap((area) => area.layers) || [];
+  if (!layers.length) return;
+
+  const entries = createLayerEntries(layers, highPriority);
   cachedFloorLayers.set(level, entries);
+}
+
+function buildBackgroundGroups() {
+  const backgroundGroupIds = layerCatalog.value?.groups?.[selectedGroupId.value]?.backgroundGroupIds || [];
+  for (const groupId of backgroundGroupIds) {
+    for (const floor of floors.value) {
+      const area = floor.areas.find((item) => String(item.id) === String(groupId));
+      if (!area?.layers?.length) continue;
+      const key = `${groupId}:${area.floorId ?? floor.floorLevel}`;
+      if (cachedBackgroundLayers.has(key)) continue;
+      cachedBackgroundLayers.set(key, {
+        groupId,
+        floorId: area.floorId,
+        level: floor.floorLevel,
+        entries: createLayerEntries(area.layers),
+      });
+    }
+  }
 }
 
 function buildSelectedGroup() {
@@ -318,7 +443,9 @@ function buildSelectedGroup() {
     return a.level - b.level;
   });
   for (const {level} of orderedFloors) buildFloor(level, level === selectedFloorLevel.value);
+  buildBackgroundGroups();
   showSelectedFloor();
+  overlayGeometryZoom = overlayMap?._loaded ? overlayMap.getZoom() : null;
 }
 
 function renderMode() {
@@ -326,6 +453,8 @@ function renderMode() {
   if (!enabled.value || !hasLayeredMap.value || !map.value || !imageWidth.value || !imageHeight.value) return;
 
   overlayMap = map.value;
+  overlayMap.on('zoomanim', animateCachedOverlays);
+  attachTileTransformObserver();
   const config = currentMapConfig.value.layeredMap;
   const pane = overlayMap.getPane(config.pane) || overlayMap.createPane(config.pane);
   pane.style.zIndex = '450';
@@ -338,10 +467,12 @@ function renderMode() {
   buildSelectedGroup();
 }
 
-function chooseDefaultFloor() {
+function chooseDefaultFloor(force = false) {
   const options = floorOptions.value;
-  if (options.some((item) => item.level === selectedFloorLevel.value)) return;
-  selectedFloorLevel.value = options.find((item) => item.level === -1)?.level
+  if (!force && options.some((item) => item.floorId === selectedFloorId.value)) return;
+  const defaultFloorId = layerCatalog.value?.groups?.[selectedGroupId.value]?.defaultFloorId;
+  selectedFloorLevel.value = options.find((item) => item.floorId === defaultFloorId)?.level
+    ?? options.find((item) => item.level === -1)?.level
     ?? options.find((item) => item.level === 0)?.level
     ?? [...options].sort((a, b) => Math.abs(a.level) - Math.abs(b.level))[0]?.level
     ?? null;
@@ -356,9 +487,6 @@ function resetSelection() {
 function detachControl() {
   if (viewportMap) {
     viewportMap.off('moveend zoomend resize', refreshViewportBounds);
-    viewportMap.off('zoomanim', animateCachedOverlays);
-    viewportMap.off('zoom viewreset', resetCachedOverlayGeometry);
-    viewportMap.off('click', closeModeOnBlankMapClick);
   }
   viewportMap = null;
   if (control && controlMap) control.remove();
@@ -387,9 +515,7 @@ watch(map, () => {
   renderMode();
 });
 watch(selectedGroupId, () => {
-  // Arco 下拉弹层位于 Leaflet 控件 DOM 外；阻止选项点击穿透后立刻退出分层。
-  ignoreBlankClickUntil = Date.now() + 300;
-  chooseDefaultFloor();
+  chooseDefaultFloor(true);
   if (enabled.value && cachedGroupId !== selectedGroupId.value) buildSelectedGroup();
 });
 watch(selectedFloorLevel, showSelectedFloor);
@@ -402,10 +528,14 @@ watch(currentMapName, async () => {
   await nextTick();
   attachControl();
 });
-onMounted(attachControl);
+onMounted(() => {
+  attachControl();
+  window.addEventListener('keydown', handleKeydown);
+});
 onBeforeUnmount(() => {
   clearMode();
   detachControl();
+  window.removeEventListener('keydown', handleKeydown);
 });
 </script>
 
@@ -422,7 +552,7 @@ onBeforeUnmount(() => {
           class="group-select"
           :class="groupSelectClass"
           aria-label="分层地图区域"
-          placeholder="附近区域；输入名称可全图搜索"
+          placeholder="搜索区域"
           :allow-search="{retainInputValue: false}"
           allow-clear
           v-model:input-value="groupSearch"
@@ -448,10 +578,11 @@ onBeforeUnmount(() => {
         type="button"
         class="mode-button"
         :class="{active: enabled}"
-        :title="enabled ? '退出分层地图' : '进入分层地图'"
+        :title="enabled ? '退出分层地图（Esc）' : '进入分层地图'"
         aria-label="切换分层地图"
+        :aria-pressed="enabled"
         @click="toggle"
-      >{{ enabled ? '×' : '分层' }}</button>
+      >{{ enabled ? '退出' : '分层' }}</button>
     </div>
     <div
       ref="floorControlElement"
@@ -477,36 +608,52 @@ onBeforeUnmount(() => {
 <style scoped>
 .layered-map-control-shell {
   position: static !important;
+  width: max-content;
+  max-width: none;
 }
 
 .layered-map-control {
   display: flex;
   align-items: stretch;
-  overflow: hidden;
+  width: max-content;
+  max-width: none;
+  gap: 4px;
+  padding: 4px;
+  overflow: visible;
   border: 0;
-  box-shadow: 0 1px 5px rgb(0 0 0 / 35%);
+  border-radius: 13px;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: 0 8px 22px rgb(31 48 76 / 18%);
+  backdrop-filter: blur(8px);
 }
 
 .layered-map-control button,
 .layered-map-control :deep(.arco-select) {
   box-sizing: border-box;
-  height: 36px;
+  height: 40px;
   border: 0;
-  border-right: 1px solid #d7d7d7;
-  background: #fff;
-  color: #333;
+  border-radius: 9px;
+  background: transparent;
+  color: #36506f;
 }
 
 .layered-map-control :deep(.arco-select-view-single) {
-  height: 36px;
+  height: 40px;
   border: 0;
-  border-radius: 0;
-  background: #fff;
+  border-radius: 9px;
+  background: transparent;
 }
 
-.layered-map-control .group-select {
+.layered-map-control :deep(.group-select) {
   width: var(--layered-map-select-width, 250px);
-  max-width: calc(100vw - 54px);
+  min-width: var(--layered-map-select-width, 250px);
+  max-width: var(--layered-map-select-width, 250px);
+  flex: 0 0 var(--layered-map-select-width, 250px);
+}
+
+.layered-map-control-shell.is-narrow :deep(.group-select) {
+  min-width: var(--layered-map-select-width, 96px);
+  max-width: var(--layered-map-select-width, 96px);
 }
 
 .selected-group-label {
@@ -517,65 +664,91 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.layered-map-control .group-select.compact :deep(.arco-select-view-value) {
+.layered-map-control :deep(.group-select.compact .arco-select-view-value) {
   font-size: 12px;
 }
 
-.layered-map-control .group-select.dense :deep(.arco-select-view-value) {
+.layered-map-control :deep(.group-select.dense .arco-select-view-value) {
   font-size: 11px;
 }
 
 .layered-map-control .mode-button {
-  min-width: 34px;
-  padding: 0 6px;
+  flex: none;
+  width: 56px;
+  min-width: 56px;
+  padding: 0 12px;
+  appearance: none;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
   cursor: pointer;
+  transform: none;
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .layered-map-control button:hover,
 .layered-map-control :deep(.arco-select-view-single:hover) {
-  background: #f4f4f4;
+  background: #eaf3ff;
+  color: #1677ff;
 }
 
 .layered-map-control .mode-button.active {
-  background: #1677ff;
-  color: #fff;
+  background: #dceeff;
+  color: #1264d8;
 }
 
 .layered-map-control .mode-button.active:hover {
-  background: #0958d9;
+  background: #cde5ff;
+}
+
+.layered-map-control .mode-button:focus-visible,
+.layered-map-floor-control .floor-button:focus-visible {
+  outline: 0;
+  color: #1264d8;
+  background: #dceeff;
 }
 
 .layered-map-floor-control {
   position: absolute;
   z-index: 1000;
-  top: var(--layered-map-floor-top, 50vh);
-  right: 0;
+  top: var(--layered-map-floor-top, 50%);
+  right: 10px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  max-height: var(--layered-map-floor-max-height, 420px);
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
   transform: translateY(-50%);
-  box-shadow: 0 1px 5px rgb(0 0 0 / 35%);
+  border-radius: 13px;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: 0 8px 22px rgb(31 48 76 / 18%);
+  backdrop-filter: blur(8px);
+  scrollbar-width: thin;
 }
 
 .layered-map-floor-control .floor-button {
   box-sizing: border-box;
-  width: 44px;
-  height: 38px;
-  padding: 0 6px;
+  width: 48px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 5px;
+  appearance: none;
   border: 0;
-  border-bottom: 1px solid #d7d7d7;
-  background: #fff;
-  color: #333;
+  border-radius: 8px;
+  background: transparent;
+  color: #36506f;
+  font-size: 12px;
+  font-weight: 550;
   cursor: pointer;
+  line-height: 1;
   white-space: nowrap;
-}
-
-.layered-map-floor-control .floor-button:last-child {
-  border-bottom: 0;
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .layered-map-floor-control .floor-button:hover {
-  background: #f4f4f4;
+  background: #eaf3ff;
+  color: #1677ff;
 }
 
 .layered-map-floor-control .floor-button.active {
@@ -585,11 +758,7 @@ onBeforeUnmount(() => {
 }
 
 .layered-map-floor-control .floor-button.active:hover {
-  background: #d7eaff;
-}
-
-.layered-map-control > :last-child {
-  border-right: 0;
+  background: #cde5ff;
 }
 
 :global(#map.layered-map-mode) {
