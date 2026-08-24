@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:single": "vite --mode single",
-    "build": "vite build && node scripts/generate-tiles.js dist/tiles",
-    "build:single": "node scripts/generate-tiles.js tile-cache && vite build --config vite.config.single.js --mode single && node scripts/generate-tiles.js --cleanup tile-cache",
+    "build": "node scripts/prepare-layer-cache.js && vite build && node scripts/generate-tiles.js dist/tiles && node scripts/prepare-layer-cache.js --cleanup",
+    "build:single": "node scripts/prepare-layer-cache.js && node scripts/generate-tiles.js tile-cache && vite build --config vite.config.single.js --mode single && node scripts/generate-tiles.js --cleanup tile-cache && node scripts/prepare-layer-cache.js --cleanup",
     "preview": "vite preview",
     "generate-tiles": "node scripts/generate-tiles.js"
   },
@@ -18,9 +18,9 @@
   },
   "devDependencies": {
     "@arco-design/web-vue": "^2.56.2",
-    "@vitejs/plugin-vue": "^5.0.5",
-    "sharp": "^0.34.5",
-    "vite": "^5.3.1",
-    "vite-plugin-singlefile": "^2.0.2"
+    "@vitejs/plugin-vue": "^6.0.8",
+    "sharp": "0.35.0",
+    "vite": "8.0.16",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

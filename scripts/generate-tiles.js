@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { writeFileSync, existsSync, rmSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { MAPS } from '../src/config/mapConfig.js';
 
 const BATCH_SIZE = 30;
@@ -76,6 +76,8 @@ async function generateTilesForMap(map) {
       const batch = tasks.slice(i, i + BATCH_SIZE);
       const posKey = W >= H ? 'top' : 'left';
       await Promise.all(batch.map(t => {
+        // Windows 下构建/预览切换可能短暂清理 dist，写入前再次保证目录存在。
+        mkdirSync(dirname(t.outFile), { recursive: true });
         return sharp(rawBuffer, rawOpts)
           .extract({ left: t.left, top: t.top, width: t.width, height: t.height })
           .resize(TILE_SIZE, TILE_SIZE, { fit: 'contain', position: posKey, background: { r: 0, g: 0, b: 0, alpha: 0 } })
