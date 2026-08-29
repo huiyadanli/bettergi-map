@@ -37,6 +37,27 @@ function inlineFavicon() {
   }
 }
 
+/**
+ * singlefile 会把整份 CSS 放进一个 HTML <style> 标签。Geoman 的文字工具
+ * 图标是内联 SVG，其中又包含一个真正的 </style>；HTML 解析器会把它误认
+ * 为外层样式的结束标签，导致其后的 CSS 直接显示成页面文本。
+ */
+function protectInlineSvgStyleTags() {
+  return {
+    name: 'protect-inline-svg-style-tags',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'asset' || !output.fileName.endsWith('.html')) continue
+        const html = String(output.source)
+        output.source = html
+          .replaceAll('<defs><style>', '<defs>%3Cstyle%3E')
+          .replaceAll('</style></defs>', '%3C/style%3E</defs>')
+      }
+    }
+  }
+}
+
 // 读取构建时生成的瓦片 meta，通过 define 注入
 const metaPath = resolve('tile-cache/meta.json')
 const tileMeta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf-8')) : {}
@@ -52,6 +73,7 @@ export default defineConfig({
   plugins: [
     vue(),
     viteSingleFile(),
+    protectInlineSvgStyleTags(),
     inlineFavicon()
   ],
   resolve: {
