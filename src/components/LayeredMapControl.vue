@@ -9,6 +9,7 @@ import seaOfBygoneErasLayerConfig from '../config/layers/SeaOfBygoneEras';
 import templeOfSpaceLayerConfig from '../config/layers/TempleOfSpace';
 import {currentMapConfig, currentMapName, imageHeight, imageWidth, map} from '../stores/editor';
 import {getLayerImageUrl} from '../utils/layerImageIndex';
+import ComfortSelect from './ComfortSelect.vue';
 
 const LAYER_CATALOGS = {
   Teyvat: teyvatLayerConfig,
@@ -113,7 +114,13 @@ const floorOptions = computed(() => floors.value
 const selectedFloorId = computed(() => floorOptions.value
   .find((floor) => floor.level === selectedFloorLevel.value)?.floorId ?? null);
 const visibleGroupOptions = computed(() => {
-  if (groupSearch.value.trim() || !viewportReferenceBounds.value) return groupOptions.value;
+  const query = groupSearch.value.trim().toLocaleLowerCase();
+  if (query) {
+    return groupOptions.value.filter((item) => `${item.searchText} ${item.floorText}`
+      .toLocaleLowerCase()
+      .includes(query));
+  }
+  if (!viewportReferenceBounds.value) return groupOptions.value;
   const [left, top, right, bottom] = viewportReferenceBounds.value;
   const centerX = (left + right) / 2;
   const centerY = (top + bottom) / 2;
@@ -135,6 +142,11 @@ const visibleGroupOptions = computed(() => {
     ? [selected, ...visibleGroups]
     : visibleGroups;
 });
+const comfortGroupOptions = computed(() => visibleGroupOptions.value.map((item) => ({
+  value: item.id,
+  label: item.label,
+  meta: item.floorText,
+})));
 
 let control = null;
 let controlMap = null;
@@ -362,14 +374,6 @@ function showSelectedFloor() {
   });
 }
 
-function filterGroupOption(inputValue, option) {
-  const item = groupOptions.value.find((candidate) => candidate.id === String(option.value));
-  const query = inputValue.trim().toLocaleLowerCase();
-  return !query || `${item?.searchText || ''} ${item?.floorText || ''}`
-    .toLocaleLowerCase()
-    .includes(query);
-}
-
 function layerImageUrl(id) {
   const config = currentMapConfig.value.layeredMap;
   const bundled = getLayerImageUrl(currentMapName.value, id, config.format);
@@ -547,32 +551,17 @@ onBeforeUnmount(() => {
   >
     <div class="layered-map-control leaflet-bar">
       <template v-if="enabled">
-        <a-select
+        <ComfortSelect
           v-model="selectedGroupId"
           class="group-select"
           :class="groupSelectClass"
+          :options="comfortGroupOptions"
           aria-label="分层地图区域"
           placeholder="搜索区域"
-          :allow-search="{retainInputValue: false}"
-          allow-clear
+          searchable
+          clearable
           v-model:input-value="groupSearch"
-          :filter-option="filterGroupOption"
-        >
-          <template #label="{data}">
-            <span class="selected-group-label" :title="data.label">{{ data.label }}</span>
-          </template>
-          <a-option
-            v-for="item in visibleGroupOptions"
-            :key="item.id"
-            :value="item.id"
-            :label="item.label"
-          >
-            <span class="group-option-row">
-              <span>{{ item.label }}</span>
-              <span class="group-option-meta">{{ item.floorText }}</span>
-            </span>
-          </a-option>
-        </a-select>
+        />
       </template>
       <button
         type="button"
@@ -627,8 +616,7 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(8px);
 }
 
-.layered-map-control button,
-.layered-map-control :deep(.arco-select) {
+.layered-map-control button {
   box-sizing: border-box;
   height: 40px;
   border: 0;
@@ -637,18 +625,12 @@ onBeforeUnmount(() => {
   color: #36506f;
 }
 
-.layered-map-control :deep(.arco-select-view-single) {
-  height: 40px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-}
-
 .layered-map-control :deep(.group-select) {
   width: var(--layered-map-select-width, 250px);
   min-width: var(--layered-map-select-width, 250px);
   max-width: var(--layered-map-select-width, 250px);
   flex: 0 0 var(--layered-map-select-width, 250px);
+  --comfort-select-height: 40px;
 }
 
 .layered-map-control-shell.is-narrow :deep(.group-select) {
@@ -656,19 +638,11 @@ onBeforeUnmount(() => {
   max-width: var(--layered-map-select-width, 96px);
 }
 
-.selected-group-label {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.layered-map-control :deep(.group-select.compact .arco-select-view-value) {
+.layered-map-control :deep(.group-select.compact .comfort-select-value) {
   font-size: 12px;
 }
 
-.layered-map-control :deep(.group-select.dense .arco-select-view-value) {
+.layered-map-control :deep(.group-select.dense .comfort-select-value) {
   font-size: 11px;
 }
 
@@ -686,8 +660,7 @@ onBeforeUnmount(() => {
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
-.layered-map-control button:hover,
-.layered-map-control :deep(.arco-select-view-single:hover) {
+.layered-map-control button:hover {
   background: #eaf3ff;
   color: #1677ff;
 }
@@ -779,26 +752,5 @@ onBeforeUnmount(() => {
   will-change: transform, filter;
   backface-visibility: hidden;
   transform-origin: 0 0;
-}
-
-.group-option-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 16px;
-}
-
-.group-option-row > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.group-option-meta {
-  flex: none;
-  color: #86909c;
-  font-size: 12px;
 }
 </style>

@@ -14,6 +14,7 @@ import {deletePolyline, renamePolyline, selectPolyline} from '../composables/use
 import {importPositions} from '../composables/useFileAccess';
 import {commonTagManagerModal} from '../composables/useRouteSettings';
 import {exportPositions} from '../composables/useExport';
+import ComfortSelect from './ComfortSelect.vue';
 
 const expanded = ref(false);
 const hasFocus = ref(false);
@@ -30,6 +31,10 @@ const activeRouteIndex = computed(() => {
   const index = polylines.value.indexOf(activeRoute.value);
   return index < 0 ? 0 : index;
 });
+const mapOptions = Object.entries(MAPS).map(([value, config]) => ({
+  value,
+  label: config.displayName,
+}));
 const otherRoutes = computed(() => polylines.value
   .map((item, index) => ({item, index}))
   .filter(({index}) => index !== activeRouteIndex.value));
@@ -192,17 +197,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="route-toolbar">
-          <a-select
+          <ComfortSelect
               :model-value="selectedMapName"
               class="map-select"
+              :options="mapOptions"
               aria-label="当前地图"
               @change="handleMapChange"
               @popup-visible-change="handleMapPopup"
-          >
-            <a-option v-for="(config, name) in MAPS" :key="name" :value="name">
-              {{ config.displayName }}
-            </a-option>
-          </a-select>
+          />
           <a-button class="import-button" @click.stop="importPositions" type="primary">
             <template #icon><icon-import/></template>
             导入
@@ -216,17 +218,14 @@ onBeforeUnmount(() => {
         </div>
         <span class="empty-route-name">暂无路线</span>
         <div class="route-toolbar">
-          <a-select
+          <ComfortSelect
               :model-value="selectedMapName"
               class="map-select"
+              :options="mapOptions"
               aria-label="当前地图"
               @change="handleMapChange"
               @popup-visible-change="handleMapPopup"
-          >
-            <a-option v-for="(config, name) in MAPS" :key="name" :value="name">
-              {{ config.displayName }}
-            </a-option>
-          </a-select>
+          />
           <a-button class="import-button" @click.stop="importPositions" type="primary">
             <template #icon><icon-import/></template>
             导入
@@ -424,9 +423,9 @@ onBeforeUnmount(() => {
 
 .map-select {
   width: 142px;
+  --comfort-select-height: 36px;
 }
 
-.map-select :deep(.arco-select-view-single),
 .import-button {
   min-height: 36px;
   height: 36px;
