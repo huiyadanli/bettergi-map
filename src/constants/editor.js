@@ -10,14 +10,22 @@ export const MAX_HISTORY = 50;
 // 战斗策略本地存储键
 export const COMBAT_SCRIPT_KEY = '_combatScriptData';
 
+// 坐标在编辑与导出时统一保留的小数位数。
+export const COORDINATE_PRECISION = 4;
+const COORDINATE_SCALE = 10 ** COORDINATE_PRECISION;
+
+export function normalizeCoordinate(value) {
+  return Math.round(Number(value) * COORDINATE_SCALE) / COORDINATE_SCALE;
+}
+
 // 点位表格基础列；运行列由 editor store 统一插入。
 export const columnsBase = [
-  {title: '#', dataIndex: 'id', slotName: 'id', width: 52},
+  {title: '#', dataIndex: 'id', slotName: 'id', width: 88},
   {title: '坐标', dataIndex: 'xy', slotName: 'xy', width: 150},
   {title: '类型', dataIndex: 'type', slotName: 'type', width: 110},
   {title: '移动方式', dataIndex: 'move_mode', slotName: 'move_mode', width: 126},
   {title: '动作', dataIndex: 'action', slotName: 'action', width: 290},
-  {title: '操作', slotName: 'operations', width: 120, fixed: 'right'},
+  {title: '操作', slotName: 'operations', width: 124, fixed: 'right'},
 ];
 
 // 点位动作级联选项

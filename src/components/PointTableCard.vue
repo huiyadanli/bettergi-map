@@ -5,8 +5,8 @@
  * 负责点位编辑、运行、合并拆分和打开相关弹窗。
  */
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
-import {actionOptionsTree} from '../constants/editor';
-import {formatNumber} from '../utils/format';
+import {actionOptionsTree, COORDINATE_PRECISION, normalizeCoordinate} from '../constants/editor';
+import ComfortSelect from './ComfortSelect.vue';
 import {
   columns,
   selectedPolyline,
@@ -19,7 +19,7 @@ import {
   showRouteMergeModal,
 } from '../stores/editor';
 import {
-  handleChange,
+  handleChange as applyTableChange,
   selectPoint,
   setPositionRowClass,
   updatePosition,
@@ -28,7 +28,6 @@ import {
   moreSelect,
   lockRowIndex,
   unlockRowIndex,
-  editPointModal,
   runFromPoint,
   clearSelection,
   clearPoints,
@@ -42,6 +41,26 @@ import {editPointExtParams, deletePointExtParams} from '../composables/usePointE
 const tableWrapElement = ref(null);
 const tableBodyHeight = ref(240);
 let tableResizeObserver = null;
+let mouseDrag = null;
+let suppressRowClickUntil = 0;
+let previousBodyCursor = '';
+let previousBodyUserSelect = '';
+
+const moveModeOptions = [
+  {value: 'walk', label: '行走'},
+  {value: 'dash', label: '间歇冲刺'},
+  {value: 'run', label: '持续奔跑'},
+  {value: 'fly', label: '飞行'},
+  {value: 'swim', label: '游泳'},
+  {value: 'climb', label: '攀爬'},
+  {value: 'jump', label: '跳跃'},
+];
+const pointTypeOptions = [
+  {value: 'teleport', label: '传送'},
+  {value: 'path', label: '途经'},
+  {value: 'target', label: '目标'},
+  {value: 'orientation', label: '朝向'},
+];
 
 function syncTableBodyHeight() {
   const wrap = tableWrapElement.value;
@@ -60,14 +79,157 @@ onMounted(() => {
   });
 });
 
-onBeforeUnmount(() => tableResizeObserver?.disconnect());
+onBeforeUnmount(() => {
+  tableResizeObserver?.disconnect();
+  finishMouseDrag(false);
+});
 
 function handleRowClick(record, event) {
+  if (performance.now() < suppressRowClickUntil) return;
   const target = event?.target;
   if (target instanceof Element && target.closest(
-    'button, input, textarea, [role="button"], .arco-trigger, .arco-select, .arco-input-wrapper, .arco-cascader',
+    'button, input, textarea, [role="button"], [role="combobox"], .arco-trigger, .arco-input-wrapper',
   )) return;
   selectPoint(record);
+}
+
+function handleCoordinateChange(record, rowIndex, key, value) {
+  const coordinate = Number(value);
+  if (!Number.isFinite(coordinate)) return;
+  const normalizedCoordinate = normalizeCoordinate(coordinate);
+  updatePosition(selectedPolylineIndex.value, rowIndex, key, normalizedCoordinate);
+  if (selectedPointIndex.value === rowIndex) selectPoint(record);
+}
+
+function gadgetWaitValue(actionParams) {
+  if (actionParams === '' || actionParams == null) return undefined;
+  if (String(actionParams).toLowerCase().includes('not_wait')) return 0;
+  const seconds = Number(actionParams);
+  return Number.isFinite(seconds) ? seconds : undefined;
+}
+
+function handleGadgetWaitChange(record, value) {
+  if (value === '' || value == null) {
+    record.action_params = '';
+    return;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) record.action_params = String(seconds);
+}
+
+function tableRows() {
+  if (!tableWrapElement.value) return [];
+  return [...tableWrapElement.value.querySelectorAll('tbody > .arco-table-tr.point-row')];
+}
+
+function clearDragPreview() {
+  tableRows().forEach((row) => {
+    row.style.removeProperty('--drag-shift');
+    row.classList.remove('is-drag-source');
+  });
+}
+
+function handleTableMouseDown(event) {
+  if (event.button !== 0 || mouseDrag) return;
+  const rows = tableRows();
+  const target = event.target instanceof Element ? event.target : null;
+  const row = target?.closest('.arco-table-tr') || null;
+  const cell = target?.closest('.arco-table-td') || null;
+  const cellIndex = row && cell ? [...row.children].indexOf(cell) : -1;
+  const isInteractive = Boolean(target?.closest('button, input, textarea, [role="button"], [role="combobox"]'));
+  const sourceIndex = rows.indexOf(row);
+  if (sourceIndex < 0 || cellIndex < 0 || cellIndex >= 2 || isInteractive) return;
+
+  mouseDrag = {
+    sourceIndex,
+    targetIndex: sourceIndex,
+    startY: event.clientY,
+    rowHeight: row.getBoundingClientRect().height,
+    active: false,
+  };
+  window.addEventListener('mousemove', handleTableMouseMove);
+  window.addEventListener('mouseup', handleTableMouseUp);
+  window.addEventListener('blur', handleTableMouseCancel);
+}
+
+function activateMouseDrag() {
+  if (!mouseDrag || mouseDrag.active) return;
+  mouseDrag.active = true;
+  previousBodyCursor = document.body.style.cursor;
+  previousBodyUserSelect = document.body.style.userSelect;
+  document.body.style.cursor = 'grabbing';
+  document.body.style.userSelect = 'none';
+  tableRows()[mouseDrag.sourceIndex]?.classList.add('is-drag-source');
+}
+
+function handleTableMouseMove(event) {
+  if (!mouseDrag) return;
+  const deltaY = event.clientY - mouseDrag.startY;
+  if (!mouseDrag.active && Math.abs(deltaY) < 4) return;
+  activateMouseDrag();
+  event.preventDefault();
+
+  const rows = tableRows();
+  if (!rows.length) return;
+  let targetIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  rows.forEach((row, index) => {
+    const shift = Number.parseFloat(row.style.getPropertyValue('--drag-shift')) || 0;
+    const rect = row.getBoundingClientRect();
+    const baseCenter = rect.top - shift + rect.height / 2;
+    const distance = Math.abs(event.clientY - baseCenter);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      targetIndex = index;
+    }
+  });
+
+  mouseDrag.targetIndex = targetIndex;
+
+  rows.forEach((item, index) => {
+    let shift = 0;
+    if (index === mouseDrag.sourceIndex) {
+      shift = deltaY;
+    } else if (targetIndex > mouseDrag.sourceIndex && index > mouseDrag.sourceIndex && index <= targetIndex) {
+      shift = -mouseDrag.rowHeight;
+    } else if (targetIndex < mouseDrag.sourceIndex && index >= targetIndex && index < mouseDrag.sourceIndex) {
+      shift = mouseDrag.rowHeight;
+    }
+    item.style.setProperty('--drag-shift', `${shift}px`);
+  });
+}
+
+function removeMouseDragListeners() {
+  window.removeEventListener('mousemove', handleTableMouseMove);
+  window.removeEventListener('mouseup', handleTableMouseUp);
+  window.removeEventListener('blur', handleTableMouseCancel);
+}
+
+function finishMouseDrag(commit) {
+  if (!mouseDrag) return;
+  const drag = mouseDrag;
+  mouseDrag = null;
+  removeMouseDragListeners();
+  clearDragPreview();
+  if (drag.active) {
+    document.body.style.cursor = previousBodyCursor;
+    document.body.style.userSelect = previousBodyUserSelect;
+    suppressRowClickUntil = performance.now() + 350;
+  }
+
+  if (!commit || !drag.active || drag.targetIndex === drag.sourceIndex) return;
+  const nextData = [...selectedPolyline.value.positions];
+  const [moved] = nextData.splice(drag.sourceIndex, 1);
+  nextData.splice(drag.targetIndex, 0, moved);
+  applyTableChange(nextData);
+}
+
+function handleTableMouseUp() {
+  finishMouseDrag(true);
+}
+
+function handleTableMouseCancel() {
+  finishMouseDrag(false);
 }
 </script>
 
@@ -142,78 +304,89 @@ function handleRowClick(record, event) {
       </div>
     </template>
 
-    <div ref="tableWrapElement" class="table-wrap">
+    <div
+        ref="tableWrapElement"
+        class="table-wrap"
+        @mousedown.capture="handleTableMouseDown"
+        @dragstart.capture.prevent
+    >
       <a-table
           :columns="columns"
           :data="selectedPolyline.positions"
           :pagination="false"
-          :scroll="{ x: 900, y: tableBodyHeight }"
+          :scroll="{ x: 924, y: tableBodyHeight }"
           :sticky-header="true"
           size="small"
-          :draggable="{ type: 'row' }"
-          @change="handleChange"
           @row-click="handleRowClick"
           :row-class="setPositionRowClass"
       >
-        <template #play="{ rowIndex }">
-          <a-tooltip content="从此处运行">
-            <a-button type="text" size="small" class="play-btn" aria-label="从此处运行" @click.stop="runFromPoint(rowIndex)">
-              <template #icon><icon-play-arrow/></template>
-            </a-button>
-          </a-tooltip>
+        <template #drag>
+          <span class="drag-handle" title="按住此行拖动排序" aria-hidden="true">
+            <icon-drag-dot-vertical/>
+          </span>
         </template>
-        <template #id="{ record }">
-          <a-tooltip v-if="record.point_ext_params" content="已配置扩展参数">
-            <span class="point-id has-extension">
-              {{ record.id }}<icon-info-circle/>
-            </span>
-          </a-tooltip>
-          <span v-else class="point-id">{{ record.id }}</span>
+        <template #id="{ record, rowIndex }">
+          <div class="point-index-cell">
+            <a-tooltip v-if="record.point_ext_params" content="已配置扩展参数">
+              <span class="point-id has-extension">
+                {{ record.id }}<icon-info-circle/>
+              </span>
+            </a-tooltip>
+            <span v-else class="point-id">{{ record.id }}</span>
+            <a-tooltip content="从此处运行">
+              <a-button type="text" size="small" class="play-btn" aria-label="从此处运行" @click.stop="runFromPoint(rowIndex)">
+                <template #icon><icon-play-arrow/></template>
+              </a-button>
+            </a-tooltip>
+          </div>
         </template>
         <template #xy="{ record, rowIndex }">
-          <button
-              type="button"
-              class="coord-cell"
-              :aria-label="`编辑第 ${rowIndex + 1} 个点位坐标`"
-              @click.stop="editPointModal(record, rowIndex)"
-          >
-            <span class="coord-line coord-x"><small>X</small><strong>{{ formatNumber(record.x) }}</strong></span>
-            <span class="coord-line coord-y"><small>Y</small><strong>{{ formatNumber(record.y) }}</strong></span>
-          </button>
-        </template>
-        <template #x="{ record, rowIndex }">
-          <a-input-number
-              v-model="record.x"
-              @click.stop
-              @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'x', value)"
-          />
-        </template>
-        <template #y="{ record, rowIndex }">
-          <a-input-number
-              v-model="record.y"
-              @click.stop
-              @change="(value) => updatePosition(selectedPolylineIndex, rowIndex, 'y', value)"
-          />
+          <div class="coord-editor" @click.stop @mousedown.stop @dragstart.stop.prevent>
+            <label class="coord-input coord-x">
+              <span>X</span>
+              <a-input-number
+                  :model-value="record.x"
+                  :step="0.0001"
+                  :precision="COORDINATE_PRECISION"
+                  hide-button
+                  :aria-label="`第 ${rowIndex + 1} 个点位 X 坐标`"
+                  @focus="selectPoint(record)"
+                  @change="(value) => handleCoordinateChange(record, rowIndex, 'x', value)"
+              />
+            </label>
+            <label class="coord-input coord-y">
+              <span>Y</span>
+              <a-input-number
+                  :model-value="record.y"
+                  :step="0.0001"
+                  :precision="COORDINATE_PRECISION"
+                  hide-button
+                  :aria-label="`第 ${rowIndex + 1} 个点位 Y 坐标`"
+                  @focus="selectPoint(record)"
+                  @change="(value) => handleCoordinateChange(record, rowIndex, 'y', value)"
+              />
+            </label>
+          </div>
         </template>
         <template #move_mode="{ record }">
-          <a-select v-model="record.move_mode" @click.stop>
-            <a-option value="walk">行走</a-option>
-            <a-option value="dash">间歇冲刺</a-option>
-            <a-option value="run">持续奔跑</a-option>
-            <a-option value="fly">飞行</a-option>
-            <a-option value="swim">游泳</a-option>
-            <a-option value="climb">攀爬</a-option>
-            <a-option value="jump">跳跃</a-option>
-          </a-select>
+          <ComfortSelect
+              v-model="record.move_mode"
+              class="point-select"
+              size="compact"
+              :options="moveModeOptions"
+              aria-label="移动方式"
+          />
         </template>
         <template #action="{ record }">
           <div class="action-cell" @click.stop>
-            <a-cascader
+            <ComfortSelect
                 v-model="record.action"
+                class="action-select"
+                size="compact"
                 :options="actionOptionsTree"
                 placeholder="请选择动作"
+                aria-label="点位动作"
                 @change="actionChange(record)"
-                :field-names="{ label: 'label', value: 'value', children: 'children' }"
             />
             <a-input allow-clear v-if="record.action === 'log_output'" v-model="record.action_params"
                      :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志"/>
@@ -223,17 +396,31 @@ function handleRowClick(record, event) {
                      placeholder="设置时间 HH:MM"/>
             <a-input allow-clear v-if="record.action === 'linnea_mining'" v-model="record.action_params"
                      placeholder="射箭次数，旋转寻矿次数"/>
+            <a-input-number
+                v-if="record.action === 'use_gadget'"
+                :model-value="gadgetWaitValue(record.action_params)"
+                placeholder="冷却等待上限"
+                :min="0"
+                :max="100"
+                :step="0.5"
+                hide-button
+                aria-label="小道具最大等待冷却时间（秒）"
+                @change="(value) => handleGadgetWaitChange(record, value)"
+            >
+              <template #suffix>秒</template>
+            </a-input-number>
             <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action === 'combat_script'"
                              v-model="record.action_params" placeholder="录入或选择策略"/>
           </div>
         </template>
         <template #type="{ record }">
-          <a-select v-model="record.type" @click.stop>
-            <a-option value="teleport">传送</a-option>
-            <a-option value="path">途经</a-option>
-            <a-option value="target">目标</a-option>
-            <a-option value="orientation">朝向</a-option>
-          </a-select>
+          <ComfortSelect
+              v-model="record.type"
+              class="point-select"
+              size="compact"
+              :options="pointTypeOptions"
+              aria-label="点位类型"
+          />
         </template>
         <template #operations="{ record, rowIndex }">
           <div class="row-actions" @click.stop>
@@ -263,8 +450,16 @@ function handleRowClick(record, event) {
                 <a-doption v-else :value="{ onclick: unlockRowIndex, record, rowIndex }">解除锁定</a-doption>
               </template>
             </a-dropdown>
-            <a-tooltip v-if="record.locked" content="已锁定：新点位会插入到此处">
-              <icon-lock class="locked-icon"/>
+            <a-tooltip v-if="record.locked" content="点击解除插入位置锁定">
+              <a-button
+                  class="locked-toggle"
+                  type="text"
+                  size="small"
+                  aria-label="解除插入位置锁定"
+                  @click.stop="unlockRowIndex(record)"
+              >
+                <template #icon><icon-lock/></template>
+              </a-button>
             </a-tooltip>
           </div>
         </template>
@@ -396,9 +591,7 @@ function handleRowClick(record, event) {
   padding: 5px 8px;
 }
 
-.table-wrap :deep(.arco-table-td-content),
-.table-wrap :deep(.arco-table-td-content > .arco-select),
-.table-wrap :deep(.arco-table-td-content > .arco-cascader) {
+.table-wrap :deep(.arco-table-td-content) {
   width: 100%;
   min-width: 0;
 }
@@ -411,28 +604,78 @@ function handleRowClick(record, event) {
   background: #f7fbff;
 }
 
-.table-wrap :deep(.arco-table-tr-draggable) {
+.table-wrap :deep(.arco-table-tr.point-row) {
+  cursor: default;
+  transform: translateY(var(--drag-shift, 0));
+  transform-origin: center;
+  transition: transform 160ms cubic-bezier(.22, .8, .3, 1), filter 160ms ease, opacity 120ms ease;
+}
+
+.table-wrap :deep(.arco-table-tr.point-row .arco-table-td:nth-child(-n + 2)) {
   cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
-.table-wrap :deep(.arco-table-tr-draggable:active),
-.table-wrap :deep(.arco-table-tr-drag) {
+.table-wrap :deep(.arco-table-tr.point-row.is-drag-source) {
+  position: relative;
   cursor: grabbing;
+  z-index: 3;
+  filter: drop-shadow(0 7px 8px rgb(31 48 76 / 16%));
+  opacity: 0.92;
+  transition: filter 140ms ease, opacity 100ms ease;
 }
 
-.table-wrap :deep(.arco-table-tr-draggable input),
-.table-wrap :deep(.arco-table-tr-draggable textarea) {
+.table-wrap :deep(.arco-table-tr.point-row.is-drag-source),
+.table-wrap :deep(.arco-table-tr.point-row[style*="--drag-shift"]) {
+  will-change: transform;
+}
+
+.table-wrap :deep(.arco-table-tr.point-row input),
+.table-wrap :deep(.arco-table-tr.point-row textarea) {
   cursor: text;
 }
 
-.table-wrap :deep(.arco-table-tr-draggable button:not(:disabled)),
-.table-wrap :deep(.arco-table-tr-draggable .arco-select:not(.arco-select-disabled)),
-.table-wrap :deep(.arco-table-tr-draggable .arco-cascader:not(.arco-cascader-disabled)) {
+.table-wrap :deep(.arco-table-tr.point-row button:not(:disabled)),
+.table-wrap :deep(.arco-table-tr.point-row .comfort-select:not(.is-disabled)) {
   cursor: pointer;
 }
 
 .table-wrap :deep(.arco-table-tr.selected-row .arco-table-td) {
   background: #dcecff;
+}
+
+.table-wrap :deep(.arco-table-tr.locked .arco-table-td) {
+  background: #fff3d6 !important;
+}
+
+.table-wrap :deep(.arco-table-tr.locked:hover .arco-table-td) {
+  background: #ffe9b9 !important;
+}
+
+.table-wrap :deep(.arco-table-tr.locked.selected-row .arco-table-td) {
+  background: #ffe2a3 !important;
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  color: #94a3b8;
+  cursor: grab;
+  font-size: 19px;
+  transition: color 140ms ease, transform 160ms cubic-bezier(.22, .8, .3, 1);
+}
+
+.table-wrap :deep(.arco-table-tr:hover) .drag-handle {
+  color: #587493;
+}
+
+.table-wrap :deep(.arco-table-tr.point-row.is-drag-source) .drag-handle {
+  color: var(--brand);
+  cursor: grabbing;
+  transform: scale(1.14);
 }
 
 .point-id {
@@ -449,57 +692,86 @@ function handleRowClick(record, event) {
   color: var(--brand);
 }
 
-.coord-cell {
+.point-index-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coord-editor {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
   width: 100%;
-  padding: 0;
-  border: 0;
-  color: var(--text-primary);
-  background: transparent;
-  cursor: pointer;
+}
+
+.coord-input {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
-  line-height: 1.28;
-  text-align: left;
 }
 
-.coord-cell span {
-  white-space: nowrap;
-}
-
-.coord-cell small {
-  display: inline-block;
-  width: 14px;
-  margin-right: 3px;
+.coord-input > span {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
+  text-align: center;
 }
 
-.coord-line {
-  font-weight: 600;
-  letter-spacing: 0.01em;
+.coord-input :deep(.arco-input-number) {
+  width: 100%;
+  min-width: 0;
 }
 
-.coord-cell .coord-x {
+.coord-input :deep(.arco-input-wrapper) {
+  padding-right: 6px;
+  padding-left: 6px;
+  background: var(--coord-bg);
+  border-color: transparent;
+}
+
+.coord-input :deep(.arco-input-wrapper:hover),
+.coord-input :deep(.arco-input-wrapper.arco-input-focus) {
+  background: var(--coord-focus-bg);
+  border-color: var(--coord-border);
+}
+
+.coord-input :deep(.arco-input) {
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.coord-input.coord-x :deep(.arco-input) {
+  color: #2468b4 !important;
+  -webkit-text-fill-color: #2468b4;
+}
+
+.coord-input.coord-y :deep(.arco-input) {
+  color: #12805c !important;
+  -webkit-text-fill-color: #12805c;
+}
+
+.coord-x {
+  --coord-bg: #edf5ff;
+  --coord-focus-bg: #e2efff;
+  --coord-border: #8cb8e9;
   color: #2468b4;
 }
 
-.coord-cell .coord-y {
+.coord-y {
+  --coord-bg: #eaf8f2;
+  --coord-focus-bg: #ddf3e9;
+  --coord-border: #7bc3a8;
   color: #12805c;
 }
 
-.coord-line strong {
-  font-weight: 600;
-}
-
-.coord-cell:hover .coord-x {
-  color: #135598;
-}
-
-.coord-cell:hover .coord-y {
-  color: #096c4c;
+.coord-editor :deep(.arco-input-wrapper) {
+  min-height: 25px !important;
+  height: 25px !important;
 }
 
 .action-cell {
@@ -510,13 +782,11 @@ function handleRowClick(record, event) {
 }
 
 .action-cell :deep(.arco-input-wrapper),
-.action-cell :deep(.arco-select-view),
-.action-cell :deep(.arco-cascader) {
+.action-cell :deep(.arco-input-number) {
   width: 100%;
 }
 
-.table-wrap :deep(.arco-input-wrapper),
-.table-wrap :deep(.arco-select-view-single) {
+.table-wrap :deep(.arco-input-wrapper) {
   min-height: 28px;
   height: 28px;
 }
@@ -525,7 +795,7 @@ function handleRowClick(record, event) {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 5px;
+  gap: 4px;
 }
 
 .row-icon-button {
@@ -548,19 +818,39 @@ function handleRowClick(record, event) {
   background: var(--danger-soft);
 }
 
-.locked-icon {
-  color: #ff7d00;
-  font-size: 14px;
+.locked-toggle {
+  width: 28px;
+  min-width: 28px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0;
+  color: #d46b08;
+  font-size: 15px;
+}
+
+.point-select {
+  width: 100%;
+  --comfort-select-height: 32px;
+}
+
+.action-select {
+  width: 100%;
+  --comfort-select-height: 32px;
+}
+
+.locked-toggle:hover {
+  color: #b45309;
+  background: #ffd994;
 }
 
 .play-btn {
-  width: 36px;
-  min-width: 36px;
-  min-height: 36px;
-  height: 36px;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  height: 30px;
   padding: 0 !important;
   color: var(--brand);
-  font-size: 17px !important;
+  font-size: 15px !important;
 }
 
 .table-empty {
@@ -590,6 +880,13 @@ function handleRowClick(record, event) {
 @media (max-width: 720px) {
   .point-header-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-wrap :deep(.arco-table-tr.point-row),
+  .drag-handle {
+    transition: none;
   }
 }
 </style>

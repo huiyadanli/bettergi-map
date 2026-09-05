@@ -76,11 +76,6 @@ button:not(:disabled):not(.arco-btn-disabled):not(.file-row),
   cursor: pointer;
 }
 
-.arco-select-view:not(.arco-select-view-disabled),
-.arco-cascader:not(.arco-cascader-disabled) {
-  cursor: pointer;
-}
-
 button:disabled,
 .arco-btn-disabled,
 [role="button"][aria-disabled="true"] {
@@ -92,7 +87,6 @@ button:disabled,
 }
 
 .arco-input-wrapper,
-.arco-select-view,
 .arco-input-tag,
 .arco-textarea-wrapper {
   border-radius: var(--radius-md);
@@ -135,27 +129,6 @@ button:disabled,
   font-size: 12px;
 }
 
-.arco-select-dropdown-list-wrapper {
-  max-height: 300px;
-}
-
-.arco-cascader-column-content {
-  max-height: 300px;
-}
-
-.arco-cascader-panel {
-  height: 300px;
-}
-
-.arco-cascader-panel-column {
-  max-height: 300px;
-}
-
-.coord-cell {
-  cursor: pointer;
-  line-height: 1.6;
-}
-
 .play-btn {
   padding: 1px !important;
   font-size: 16px !important;
@@ -163,6 +136,146 @@ button:disabled,
 
 .highlight-marker {
   z-index: 1000;
+}
+
+#map .route-point-marker {
+  cursor: pointer;
+  filter: none;
+  transition: fill 130ms ease, fill-opacity 130ms ease, stroke-width 130ms ease, filter 130ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+#map .route-point-marker.is-hovered {
+  filter: drop-shadow(0 0 5px rgb(255 89 100 / 72%)) drop-shadow(0 3px 5px rgb(35 48 67 / 28%));
+}
+
+#map .leaflet-tooltip.route-point-tooltip {
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 14px 34px rgb(31 48 76 / 20%), 0 2px 8px rgb(31 48 76 / 9%);
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+}
+
+#map .leaflet-tooltip-top.route-point-tooltip::before {
+  border-top-color: rgb(255 255 255 / 97%);
+}
+
+.route-point-card {
+  display: grid;
+  width: 218px;
+  gap: 9px;
+  padding: 11px;
+  color: #2a3d52;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  transform-origin: center bottom;
+  animation: route-point-card-in 150ms cubic-bezier(.22, .8, .3, 1) both;
+}
+
+#map .route-point-tooltip.is-leaving .route-point-card {
+  pointer-events: none;
+  animation: route-point-card-out 120ms ease both;
+}
+
+.route-point-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.route-point-card-header strong {
+  flex: none;
+  color: #24384e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.route-point-card-badges {
+  overflow: hidden;
+  color: #74869a;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-point-card-coordinates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.route-point-card-coordinates span {
+  overflow: hidden;
+  padding: 5px 7px;
+  border-radius: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-point-card-x {
+  color: #2468b4;
+  background: #edf5ff;
+}
+
+.route-point-card-y {
+  color: #12805c;
+  background: #eaf8f2;
+}
+
+.route-point-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #1264ad;
+  background: #e4f1ff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  transition: color 120ms ease, background-color 120ms ease, transform 100ms ease;
+}
+
+.route-point-run:hover {
+  color: #0b559a;
+  background: #d3e9ff;
+}
+
+.route-point-run:active {
+  transform: scale(0.98);
+}
+
+@keyframes route-point-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes route-point-card-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
 }
 
 /*
@@ -186,7 +299,8 @@ button:disabled,
 }
 
 #map .leaflet-control-zoom,
-#map .leaflet-pm-toolbar {
+#map .leaflet-pm-toolbar,
+#map .route-point-tooltip-control {
   overflow: visible;
   border: 0;
   border-radius: 13px;
@@ -211,6 +325,69 @@ button:disabled,
   flex-direction: column;
   gap: 3px;
   padding: 4px;
+}
+
+#map .route-point-tooltip-control {
+  padding: 4px;
+}
+
+#map .route-point-tooltip-toggle {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  color: #60758d;
+  background: transparent;
+  cursor: pointer;
+  outline: 0;
+  place-items: center;
+  transition: color 140ms ease, background-color 140ms ease, transform 100ms ease;
+}
+
+#map .route-point-tooltip-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
+#map .route-point-tooltip-toggle path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+#map .route-point-tooltip-toggle .disabled-slash {
+  opacity: 1;
+  stroke-width: 2;
+  transition: opacity 120ms ease, transform 120ms ease;
+  transform-origin: center;
+}
+
+#map .route-point-tooltip-toggle.active .disabled-slash {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+#map .route-point-tooltip-toggle circle {
+  fill: currentColor;
+}
+
+#map .route-point-tooltip-toggle:hover {
+  color: #1677ff;
+  background: #eaf3ff;
+}
+
+#map .route-point-tooltip-toggle.active,
+#map .route-point-tooltip-toggle:focus-visible {
+  color: #1264d8;
+  background: #dceeff;
+}
+
+#map .route-point-tooltip-toggle:active {
+  transform: scale(0.92);
 }
 
 #map .leaflet-control-zoom a {
@@ -325,10 +502,16 @@ button:disabled,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #map .route-point-card,
   #map .leaflet-control-zoom a,
+  #map .route-point-tooltip-toggle,
   #map .leaflet-pm-toolbar .leaflet-buttons-control-button,
   #map .leaflet-pm-toolbar .control-icon,
   #map .leaflet-pm-actions-container a.leaflet-pm-action {
     transition: none;
+  }
+
+  #map .route-point-card {
+    animation: none;
   }
 }
