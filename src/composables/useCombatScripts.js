@@ -35,6 +35,9 @@ export function actionChange(record) {
   }
   if (record.action === 'combat_script') {
     record.action_params = (combatScriptData.value.find((item) => item.def) || {}).value;
+  } else if (record.action === 'use_gadget') {
+    // BetterGI UseGadgetHandler 将该参数解释为最大等待冷却时间，单位秒。
+    record.action_params = '100';
   } else {
     record.action_params = '';
   }

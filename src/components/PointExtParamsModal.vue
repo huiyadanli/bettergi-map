@@ -6,6 +6,22 @@
  */
 import {showPointExtConfig, pointExtParams} from '../stores/editor';
 import {savePointExtParams} from '../composables/usePointExtParams';
+import ComfortSelect from './ComfortSelect.vue';
+
+const monsterTagOptions = [
+  {value: 'normal', label: '小怪'},
+  {value: 'elite', label: '精英'},
+  {value: 'legendary', label: '传奇'},
+];
+const misidentificationTypeOptions = [
+  {value: 'unrecognized', label: '未识别'},
+  {value: 'pathTooFar', label: '路径过远'},
+];
+const handlingModeOptions = [
+  {value: 'previousDetectedPoint', label: '取上一个识别到的点位置'},
+  {value: 'mapRecognition', label: '大地图识别'},
+  {value: 'scheduledArrival', label: '按特定时间到达'},
+];
 </script>
 
 <template>
@@ -19,30 +35,38 @@ import {savePointExtParams} from '../composables/usePointExtParams';
     <a-form class="ext-params-form" size="mini" :model="pointExtParams" auto-label-width>
       <a-form-item label="怪物标签"
                    tooltip="为此点位打上标签，后续可能根据怪物种类决定是否拾取设置等逻辑。">
-        <a-select v-model="pointExtParams.monster_tag" placeholder="请选择怪物标签" allow-clear>
-          <a-option value="normal">小怪</a-option>
-          <a-option value="elite">精英</a-option>
-          <a-option value="legendary">传奇</a-option>
-        </a-select>
+        <ComfortSelect
+            v-model="pointExtParams.monster_tag"
+            :options="monsterTagOptions"
+            placeholder="请选择怪物标签"
+            aria-label="怪物标签"
+            clearable
+        />
       </a-form-item>
 
       <a-divider orientation="left">异常识别</a-divider>
 
       <a-form-item field="misidentification.type" label="触发条件"
                    tooltip="当小地图特征点较少时，可能无法识别点位或识别到错误位置。可在这里选择需要兜底处理的情况。">
-        <a-select v-model="pointExtParams.misidentification.type" placeholder="请选择触发条件" allow-clear multiple>
-          <a-option value="unrecognized">未识别</a-option>
-          <a-option value="pathTooFar">路径过远</a-option>
-        </a-select>
+        <ComfortSelect
+            v-model="pointExtParams.misidentification.type"
+            :options="misidentificationTypeOptions"
+            placeholder="请选择触发条件"
+            aria-label="异常识别触发条件"
+            clearable
+            multiple
+        />
       </a-form-item>
 
       <a-form-item field="misidentification.handling_mode" label="处理方式"
                    tooltip="取上一个识别点：使用上一次正确识别的位置。大地图识别：打开大地图读取中心点坐标。特定时间到达：按设定时间行进，不读取小地图坐标。">
-        <a-select v-model="pointExtParams.misidentification.handling_mode" placeholder="请选择处理方式" allow-clear>
-          <a-option value="previousDetectedPoint">取上一个识别到的点位置</a-option>
-          <a-option value="mapRecognition">大地图识别</a-option>
-          <a-option value="scheduledArrival">按特定时间到达</a-option>
-        </a-select>
+        <ComfortSelect
+            v-model="pointExtParams.misidentification.handling_mode"
+            :options="handlingModeOptions"
+            placeholder="请选择处理方式"
+            aria-label="异常识别处理方式"
+            clearable
+        />
       </a-form-item>
 
       <a-form-item v-if="pointExtParams.misidentification.handling_mode === 'scheduledArrival'"
@@ -65,7 +89,7 @@ import {savePointExtParams} from '../composables/usePointExtParams';
 }
 
 .ext-params-form :deep(.arco-form-item-content),
-.ext-params-form :deep(.arco-select),
+.ext-params-form :deep(.comfort-select),
 .ext-params-form :deep(.arco-input-number),
 .ext-params-form :deep(.arco-textarea-wrapper) {
   min-width: 0;

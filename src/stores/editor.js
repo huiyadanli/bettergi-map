@@ -67,6 +67,10 @@ export const selectedPointIndex = ref(-1);
 // 地图上的选中高亮标记
 export const highlightMarker = ref(null);
 
+// 地图点位 Hover 提示开关；首次使用默认开启，之后跟随本地偏好。
+const storedRoutePointTooltipsEnabled = loadLocal('_routePointTooltipsEnabled');
+export const routePointTooltipsEnabled = ref(storedRoutePointTooltipsEnabled !== false);
+
 // fileAccessBridge 当前目录
 export const currentPath = ref('');
 
@@ -125,7 +129,7 @@ export const isAllSelected = computed(() => {
 
 // 点位表列定义；运行入口在开发页与 BetterGI 内保持一致。
 export const columns = computed(() => [
-  {title: '', dataIndex: 'play', slotName: 'play', width: 52, fixed: 'left'},
+  {title: '', dataIndex: 'drag', slotName: 'drag', width: 36, fixed: 'left'},
   ...columnsBase,
 ]);
 
@@ -160,14 +164,5 @@ export const showCommonTagManager = ref(false);
 // 正在编辑其他设置的路线下标
 export const polylineTagsSelectIndex = ref(-1);
 
-// 是否显示编辑点位坐标弹窗
-export const showEditPointModal = ref(false);
-
 // 是否显示路线合并面板
 export const showRouteMergeModal = ref(false);
-
-// 正在编辑的点位记录
-export const curUpdatePosition = ref({});
-
-// 正在编辑的点位行号
-export const curUpdatrowIndex = ref({});

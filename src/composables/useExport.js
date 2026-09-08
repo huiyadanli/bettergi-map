@@ -21,6 +21,7 @@ import {
 } from '../stores/editor';
 import {saveToFileAccessBridge} from './useFileAccess';
 import {snapshotPolyline} from './useHistory';
+import {normalizeCoordinate} from '../constants/editor';
 
 /**
  * 在导出表单中追加一个空作者。
@@ -132,8 +133,8 @@ export function handleExport() {
     },
     positions: polyline.positions.map((pos) => ({
       ...pos,
-      x: Math.round(pos.x * 10000) / 10000,
-      y: Math.round(pos.y * 10000) / 10000
+      x: normalizeCoordinate(pos.x),
+      y: normalizeCoordinate(pos.y)
     }))
   };
 

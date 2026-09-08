@@ -6,6 +6,12 @@
  */
 import {showCommonTagManager, otherConfig} from '../stores/editor';
 import {saveCommonTagManagerModal, commonTagChange} from '../composables/useRouteSettings';
+import ComfortSelect from './ComfortSelect.vue';
+
+const mapMatchOptions = [
+  {value: 'SIFT', label: '特征匹配'},
+  {value: 'TemplateMatch', label: '模板匹配（支持分层地图）'},
+];
 </script>
 
 <template>
@@ -29,11 +35,13 @@ import {saveCommonTagManagerModal, commonTagChange} from '../composables/useRout
       </a-form-item>
       <a-form-item label="地图匹配方法"
                    tooltip="选择地图匹配的方法，SIFT特征匹配适用于一般情况，TemplateMatch模板匹配支持分层地图。">
-        <a-select v-model="otherConfig.mapMatchMethod" placeholder="请选择地图匹配方法" allow-clear>
-          <a-option value=""></a-option>
-          <a-option value="SIFT">特征匹配</a-option>
-          <a-option value="TemplateMatch">模板匹配（支持分层地图）</a-option>
-        </a-select>
+        <ComfortSelect
+            v-model="otherConfig.mapMatchMethod"
+            :options="mapMatchOptions"
+            placeholder="请选择地图匹配方法"
+            aria-label="地图匹配方法"
+            clearable
+        />
       </a-form-item>
     </a-form>
   </a-modal>
@@ -45,7 +53,7 @@ import {saveCommonTagManagerModal, commonTagChange} from '../composables/useRout
 }
 
 .settings-form :deep(.arco-input-tag),
-.settings-form :deep(.arco-select) {
+.settings-form :deep(.comfort-select) {
   width: 100%;
 }
 

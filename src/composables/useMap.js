@@ -170,6 +170,10 @@ export async function initMap() {
   routePane.style.zIndex = '550';
   routePane.style.pointerEvents = 'auto';
 
+  const routePointPane = map.value.createPane('routePointPane');
+  routePointPane.style.zIndex = '560';
+  routePointPane.style.pointerEvents = 'auto';
+
   if (useTiles) {
     if (mode === 'single' && hasTiles) {
       const tileOpts = {

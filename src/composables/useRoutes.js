@@ -16,16 +16,16 @@ import {
   selectedPolylineIndex,
   selectedPointIndex,
   highlightMarker,
+  routePointTooltipsEnabled,
   newPointX,
   newPointY,
   newPointName,
   showAddPointModal,
-  showEditPointModal,
-  curUpdatePosition,
-  curUpdatrowIndex,
 } from '../stores/editor';
+import {saveLocal} from '../utils/storage';
 import {switchMap} from './useMap';
 import {snapshotPolyline, ensureHistoryRoute} from './useHistory';
+import {COORDINATE_PRECISION} from '../constants/editor';
 
 const ROUTE_STYLE = Object.freeze({
   color: '#ff5964',
@@ -35,6 +35,196 @@ const ROUTE_STYLE = Object.freeze({
   lineJoin: 'round',
   pane: 'routePane',
 });
+
+const POINT_TYPE_LABELS = Object.freeze({
+  teleport: '传送',
+  path: '途经',
+  target: '目标',
+  orientation: '朝向',
+});
+const MOVE_MODE_LABELS = Object.freeze({
+  walk: '行走',
+  dash: '间歇冲刺',
+  run: '持续奔跑',
+  fly: '飞行',
+  swim: '游泳',
+  climb: '攀爬',
+  jump: '跳跃',
+});
+
+let activeRoutePointMarkers = [];
+
+function clearRoutePointMarkers() {
+  activeRoutePointMarkers.forEach((marker) => {
+    marker._routePointCleanup?.();
+    marker.off?.();
+    marker.remove?.();
+  });
+  activeRoutePointMarkers = [];
+}
+
+function formatPointCoordinate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return number.toFixed(COORDINATE_PRECISION).replace(/\.?0+$/, '');
+}
+
+function createPointTooltipContent(position, index, keepOpen, scheduleClose) {
+  const card = document.createElement('div');
+  card.className = 'route-point-card';
+  card.addEventListener('mouseenter', keepOpen);
+  card.addEventListener('mouseleave', scheduleClose);
+
+  const header = document.createElement('div');
+  header.className = 'route-point-card-header';
+  const title = document.createElement('strong');
+  title.textContent = `点位 ${index + 1}`;
+  const badges = document.createElement('span');
+  badges.className = 'route-point-card-badges';
+  badges.textContent = `${POINT_TYPE_LABELS[position.type] || position.type || '途经'} · ${MOVE_MODE_LABELS[position.move_mode] || position.move_mode || '行走'}`;
+  header.append(title, badges);
+
+  const coordinates = document.createElement('div');
+  coordinates.className = 'route-point-card-coordinates';
+  const x = document.createElement('span');
+  x.className = 'route-point-card-x';
+  x.textContent = `X ${formatPointCoordinate(position.x)}`;
+  const y = document.createElement('span');
+  y.className = 'route-point-card-y';
+  y.textContent = `Y ${formatPointCoordinate(position.y)}`;
+  coordinates.append(x, y);
+
+  const runButton = document.createElement('button');
+  runButton.type = 'button';
+  runButton.className = 'route-point-run';
+  runButton.setAttribute('aria-label', `从点位 ${index + 1} 开始运行`);
+  runButton.innerHTML = '<span aria-hidden="true">▶</span><span>从此处运行</span>';
+  runButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    runFromPoint(index);
+  });
+
+  card.append(header, coordinates, runButton);
+  L.DomEvent.disableClickPropagation(card);
+  L.DomEvent.disableScrollPropagation(card);
+  return card;
+}
+
+function refreshRoutePointMarkers() {
+  clearRoutePointMarkers();
+  if (!routePointTooltipsEnabled.value) return;
+  const route = polylines.value[selectedPolylineIndex.value];
+  if (!map.value || !route?.positions?.length || !map.value.getPane('routePointPane')) return;
+
+  activeRoutePointMarkers = route.positions.map((position, index) => {
+    const main1024Pos = coordinateConverter.value.gameToMain1024(position.x, position.y);
+    const marker = L.circleMarker([main1024Pos.y, main1024Pos.x], {
+      pane: 'routePointPane',
+      radius: 8,
+      color: 'transparent',
+      weight: 0,
+      opacity: 0,
+      fillColor: '#ff5964',
+      fillOpacity: 0,
+      className: 'route-point-marker',
+      pmIgnore: true,
+    }).addTo(map.value);
+    const tooltip = L.tooltip({
+      className: 'route-point-tooltip',
+      direction: 'top',
+      offset: L.point(0, -9),
+      opacity: 1,
+      interactive: true,
+    }, marker);
+    marker._routePointTooltip = tooltip;
+    let closeTimer = null;
+    let removalTimer = null;
+    let deferredRemoveMap = null;
+    let deferredRemoveHandler = null;
+
+    const cancelDeferredRemove = () => {
+      if (deferredRemoveMap && deferredRemoveHandler) {
+        deferredRemoveMap.off('zoomend', deferredRemoveHandler);
+      }
+      deferredRemoveMap = null;
+      deferredRemoveHandler = null;
+    };
+    const removeTooltipSafely = () => {
+      const tooltipMap = tooltip._map;
+      if (!tooltipMap) return;
+      if (tooltipMap._animatingZoom) {
+        cancelDeferredRemove();
+        deferredRemoveMap = tooltipMap;
+        deferredRemoveHandler = () => {
+          deferredRemoveMap = null;
+          deferredRemoveHandler = null;
+          tooltip.remove();
+        };
+        tooltipMap.once('zoomend', deferredRemoveHandler);
+        return;
+      }
+      tooltip.remove();
+    };
+
+    const keepOpen = () => {
+      if (closeTimer) clearTimeout(closeTimer);
+      if (removalTimer) clearTimeout(removalTimer);
+      closeTimer = null;
+      removalTimer = null;
+      cancelDeferredRemove();
+      tooltip.getElement()?.classList.remove('is-leaving');
+    };
+    const closeTooltip = () => {
+      closeTimer = null;
+      marker.setRadius(8);
+      marker.setStyle({color: 'transparent', weight: 0, opacity: 0, fillOpacity: 0});
+      marker.getElement()?.classList.remove('is-hovered');
+      const tooltipElement = tooltip.getElement();
+      if (!tooltipElement) return;
+      tooltipElement.classList.add('is-leaving');
+      removalTimer = setTimeout(() => {
+        removalTimer = null;
+        removeTooltipSafely();
+      }, 120);
+    };
+    const scheduleClose = () => {
+      keepOpen();
+      closeTimer = setTimeout(closeTooltip, 140);
+    };
+
+    marker.on('mouseover', () => {
+      keepOpen();
+      marker.setRadius(8);
+      marker.setStyle({color: '#ffffff', weight: 2.5, opacity: 1, fillOpacity: 1});
+      marker.getElement()?.classList.add('is-hovered');
+      marker.bringToFront();
+      tooltip
+        .setLatLng(marker.getLatLng())
+        .setContent(createPointTooltipContent(position, index, keepOpen, scheduleClose))
+        .addTo(map.value);
+    });
+    marker.on('mouseout', scheduleClose);
+    marker.on('click', () => selectPoint(position));
+    marker._routePointCleanup = () => {
+      if (closeTimer) clearTimeout(closeTimer);
+      if (removalTimer) clearTimeout(removalTimer);
+      closeTimer = null;
+      removalTimer = null;
+      removeTooltipSafely();
+    };
+    marker.on('remove', () => {
+      marker._routePointCleanup();
+    });
+    return marker;
+  });
+}
+
+export function setRoutePointTooltipsEnabled(enabled) {
+  routePointTooltipsEnabled.value = Boolean(enabled);
+  saveLocal('_routePointTooltipsEnabled', routePointTooltipsEnabled.value);
+  refreshRoutePointMarkers();
+}
 
 function refreshRouteStyles() {
   polylines.value.forEach((route, index) => {
@@ -47,6 +237,7 @@ function refreshRouteStyles() {
       opacity: active ? 0.94 : 0.42,
     });
   });
+  refreshRoutePointMarkers();
 }
 
 /**
@@ -84,6 +275,7 @@ export function updateMapFromPolyLine(polyline) {
   if (typeof polyline.layer?.setLatLngs === 'function') {
     polyline.layer.setLatLngs(latlngs);
   }
+  if (polylines.value[selectedPolylineIndex.value] === polyline) refreshRoutePointMarkers();
 }
 
 /**
@@ -96,6 +288,7 @@ export function updateMapFromTable(polylineIndex, positionIndex) {
   const latlngs = polyline.layer.getLatLngs();
   latlngs[positionIndex] = L.latLng(main1024Pos.y, main1024Pos.x);
   polyline.layer.setLatLngs(latlngs);
+  if (polylineIndex === selectedPolylineIndex.value) refreshRoutePointMarkers();
 }
 
 /**
@@ -320,6 +513,7 @@ export function updatePolyline(layer) {
       });
       polylines.value[index].positions = updatedPositions;
     }
+    if (index === selectedPolylineIndex.value) refreshRoutePointMarkers();
   }
 }
 
@@ -332,6 +526,7 @@ export function selectPolyline(index) {
     selectedPolylineIndex.value = -1;
     clearSelection();
     ensureHistoryRoute();
+    refreshRoutePointMarkers();
     return;
   }
 
@@ -394,6 +589,7 @@ export function deletePolyline(index) {
         selectedPolylineIndex.value = -1;
         clearSelection();
         ensureHistoryRoute();
+        refreshRoutePointMarkers();
         return;
       }
 
@@ -447,10 +643,9 @@ export function handleChange(newData) {
     selectedPoint = {x: oldRecord.x, y: oldRecord.y};
   }
 
-  polyline.positions = newData.map((item, index) => ({
-    ...item,
-    id: index + 1
-  }));
+  newData.forEach((item, index) => item.id = index + 1);
+  // 保留点位对象身份，供表格重排动画和选中状态稳定追踪。
+  polyline.positions = [...newData];
 
   const latlngs = newData.map((pos) => {
     const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
@@ -510,7 +705,7 @@ export function unlockRowIndex(record) {
  * 计算点位表格行的锁定/选中样式。
  */
 export function setPositionRowClass(record, rowIndex) {
-  let classes = [];
+  let classes = ['point-row'];
 
   if (record.locked) {
     classes.push('locked');
@@ -809,29 +1004,6 @@ export function addSpliePolyline(importedData) {
   selectedPolylineIndex.value = polylines.value.length - 1;
   refreshRouteStyles();
   snapshotPolyline();
-}
-
-/**
- * 打开编辑点位坐标弹窗。
- */
-export function editPointModal(record, rowIndex) {
-  newPointX.value = record.x;
-  newPointY.value = record.y;
-  curUpdatePosition.value = record;
-  curUpdatrowIndex.value = rowIndex;
-  showEditPointModal.value = true;
-  selectPoint(record);
-}
-
-/**
- * 把弹窗里的坐标写回点位并刷新地图。
- */
-export function updatePointModal() {
-  curUpdatePosition.value.x = newPointX.value;
-  curUpdatePosition.value.y = newPointY.value;
-  showEditPointModal.value = false;
-  updateMapFromTable(selectedPolylineIndex.value, curUpdatrowIndex.value);
-  selectPoint(curUpdatePosition.value);
 }
 
 /**
