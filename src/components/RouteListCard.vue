@@ -5,7 +5,7 @@
  * 页面只为当前路线保留一行高度；移入或聚焦后，同一片表面向下展开，
  * 其他路线仅在悬浮滚动区中出现，不会挤压点位编辑区。
  */
-import {computed, onBeforeUnmount, ref, watch} from 'vue';
+import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import {Modal} from '@arco-design/web-vue';
 import {MAPS} from '../config/mapConfig';
 import {currentMapName, polylines, selectedPolylineIndex} from '../stores/editor';
@@ -15,6 +15,7 @@ import {importPositions} from '../composables/useFileAccess';
 import {commonTagManagerModal} from '../composables/useRouteSettings';
 import {exportPositions} from '../composables/useExport';
 import ComfortSelect from './ComfortSelect.vue';
+import RouteNameEditor from './RouteNameEditor.vue';
 
 const expanded = ref(false);
 const hasFocus = ref(false);
@@ -92,9 +93,18 @@ function handleFocusIn() {
   expandRoutes();
 }
 
-function handleFocusOut() {
+async function handleFocusOut() {
+  // 等待焦点转移及输入框卸载，再判断浮层是否仍被使用。
+  await nextTick();
   hasFocus.value = routeHasFocus();
-  if (!hasFocus.value) scheduleCollapse();
+  if (!pointerInside.value && !hasFocus.value) scheduleCollapse();
+}
+
+async function handleEditingEnd() {
+  // Enter/Esc 会直接移除输入框，浏览器不一定触发 focusout。
+  await nextTick();
+  hasFocus.value = routeHasFocus();
+  if (!pointerInside.value) scheduleCollapse();
 }
 
 function handleMapPopup(visible) {
@@ -165,11 +175,13 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="current-route" @click.stop>
-          <a-input
-              v-model="activeRoute.name"
+          <RouteNameEditor
+              :key="routeKey(activeRoute)"
+              :name="activeRoute.name"
               class="current-route-name"
-              aria-label="当前路线名称"
-              @change="(value) => renamePolyline(activeRouteIndex, value)"
+              label="当前路线名称"
+              @confirm="(value) => renamePolyline(activeRouteIndex, value)"
+              @editing-end="handleEditingEnd"
           />
           <span class="route-count">{{ activeRoute.positions.length }} 点</span>
         </div>
@@ -242,13 +254,14 @@ onBeforeUnmount(() => {
               role="listitem"
           >
             <span class="option-number">{{ formatRouteIndex(index) }}</span>
-            <a-input
-                v-model="item.name"
+            <RouteNameEditor
+                :name="item.name"
                 class="option-name"
                 :title="item.name"
-                :aria-label="`路线 ${index + 1} 名称`"
+                :label="`路线 ${index + 1} 名称`"
                 @click.stop
-                @change="(value) => renamePolyline(index, value)"
+                @confirm="(value) => renamePolyline(index, value)"
+                @editing-end="handleEditingEnd"
             />
             <span class="route-count">{{ item.positions.length }} 点</span>
             <div class="option-actions">
@@ -349,31 +362,6 @@ onBeforeUnmount(() => {
 .current-route-name,
 .option-name {
   min-width: 0;
-}
-
-.current-route-name,
-.option-name {
-  height: 34px;
-  padding: 0 7px;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.current-route-name:hover,
-.current-route-name.arco-input-focus,
-.option-name:hover,
-.option-name.arco-input-focus {
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.current-route-name :deep(.arco-input),
-.option-name :deep(.arco-input) {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .route-count {
