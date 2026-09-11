@@ -28,6 +28,13 @@ let isRestoring = false;
 // selectedPolylineIndex change (for example from the export dialog) cannot
 // make undo restore another route's data.
 let activeRoute = null;
+const routeIds = new WeakMap();
+let routeIdSeed = 0;
+
+function routeId(route) {
+  if (!routeIds.has(route)) routeIds.set(route, ++routeIdSeed);
+  return routeIds.get(route);
+}
 
 function currentRoute() {
   return polylines.value[selectedPolylineIndex.value] || null;
@@ -39,6 +46,7 @@ function serializePolyline(polyline) {
     positions: polyline.positions,
     info: polyline.info,
     name: polyline.name,
+    routeNames: polylines.value.map((route) => ({id: routeId(route), name: route.name})),
     tags: polyline.tags,
     enable_monster_loot_split: polyline.enable_monster_loot_split,
     map_match_method: polyline.map_match_method
@@ -133,6 +141,10 @@ export function restoreFromHistory(pointer) {
   polyline.positions = snapshot.positions;
   polyline.info = snapshot.info;
   polyline.name = snapshot.name;
+  const routeNames = new Map((snapshot.routeNames || []).map(({id, name}) => [id, name]));
+  polylines.value.forEach((route) => {
+    if (routeNames.has(routeId(route))) route.name = routeNames.get(routeId(route));
+  });
   polyline.tags = snapshot.tags;
   polyline.enable_monster_loot_split = snapshot.enable_monster_loot_split;
   polyline.map_match_method = snapshot.map_match_method;

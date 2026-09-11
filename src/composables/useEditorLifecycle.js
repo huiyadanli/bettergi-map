@@ -12,15 +12,17 @@ import {watchRouteHistory, saveCurrentRoute, undoStep, redoStep} from './useHist
  * 处理保存、撤销和重做快捷键。
  */
 function handleKeyDown(e) {
+  if (e.defaultPrevented || e.isComposing) return;
+  const key = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
     saveCurrentRoute();
   }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === 'z') {
     e.preventDefault();
     undoStep();
   }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'z') {
     e.preventDefault();
     redoStep();
   }

@@ -469,7 +469,12 @@ export function addImportedPolylineWithoutMapSwitch(importedData, filePath = nul
  * 重命名指定路线。
  */
 export function renamePolyline(index, newName) {
-  polylines.value[index].name = newName;
+  const route = polylines.value[index];
+  const name = newName.trim();
+  if (!route || !name || route.name === name) return;
+  snapshotPolyline();
+  route.name = name;
+  snapshotPolyline();
 }
 
 /**
