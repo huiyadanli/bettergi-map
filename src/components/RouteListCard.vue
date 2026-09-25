@@ -17,6 +17,16 @@ import {exportPositions} from '../composables/useExport';
 import ComfortSelect from './ComfortSelect.vue';
 import RouteNameEditor from './RouteNameEditor.vue';
 
+// 路线列表展示形态：true = 常驻列表卡片，false = 本面板的悬浮抽屉。
+const listMode = defineModel('listMode', {type: Boolean, default: true});
+// 已导入的路线数量，向上同步给 MapEditor（v-model:route-count）。
+const routeCount = defineModel('routeCount', {type: Number, default: 0});
+
+// 路线数量变化由本组件负责同步：导入 / 新增 / 拆分 / 合并 / 删除 / 换地图都会反映。
+watch(() => polylines.value.length, (length) => {
+  routeCount.value = length;
+}, {immediate: true});
+
 const expanded = ref(false);
 const hasFocus = ref(false);
 const popupOpen = ref(false);
@@ -46,6 +56,8 @@ function routeKey(item) {
 }
 
 function expandRoutes() {
+  // 常驻列表模式下由 RouteList 卡片展示路线，抽屉不再抢着展开。
+  if (listMode.value) return;
   if (collapseTimer) clearTimeout(collapseTimer);
   expanded.value = true;
 }
@@ -209,6 +221,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="route-toolbar">
+          <a-tooltip :content="listMode ? '路线列表：常驻显示中' : '路线列表：悬浮显示中'">
+            <a-switch v-model="listMode" aria-label="切换路线列表展示形态"/>
+          </a-tooltip>
           <ComfortSelect
               :model-value="selectedMapName"
               class="map-select"
@@ -230,6 +245,9 @@ onBeforeUnmount(() => {
         </div>
         <span class="empty-route-name">暂无路线</span>
         <div class="route-toolbar">
+          <a-tooltip :content="listMode ? '路线列表：常驻显示中' : '路线列表：悬浮显示中'">
+            <a-switch v-model="listMode" aria-label="切换路线列表展示形态"/>
+          </a-tooltip>
           <ComfortSelect
               :model-value="selectedMapName"
               class="map-select"
@@ -249,7 +267,7 @@ onBeforeUnmount(() => {
         <div v-if="otherRoutes.length" class="route-scroll" role="list" aria-label="其他路线">
           <div
               v-for="({item, index}) in otherRoutes"
-              :key="routeKey(item)"
+              :key="`route-${index}`"
               class="route-option"
               role="listitem"
           >
@@ -297,6 +315,8 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 2;
   container-type: inline-size;
+  /* 父级是纵向 flex：只占一行高度，多余的留给下面的工作区。 */
+  flex: none;
   height: 48px;
   min-width: 0;
   overflow: visible;
