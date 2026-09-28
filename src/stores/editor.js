@@ -58,6 +58,10 @@ export const newPointY = ref(0);
 // 是否显示添加点位弹窗
 export const showAddPointModal = ref(false);
 
+// 数据覆盖弹窗及其当前目标点位
+export const showDataOverrideModal = ref(false);
+export const dataOverrideTarget = ref(null);
+
 // 新点位名称（当前创建逻辑未使用）
 export const newPointName = ref('');
 

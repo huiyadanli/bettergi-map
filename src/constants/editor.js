@@ -28,6 +28,25 @@ export const columnsBase = [
   {title: '操作', slotName: 'operations', width: 124, fixed: 'right'},
 ];
 
+// 点位移动方式选项
+export const moveModeOptions = [
+  {value: 'walk', label: '行走'},
+  {value: 'dash', label: '间歇冲刺'},
+  {value: 'run', label: '持续奔跑'},
+  {value: 'fly', label: '飞行'},
+  {value: 'swim', label: '游泳'},
+  {value: 'climb', label: '攀爬'},
+  {value: 'jump', label: '跳跃'},
+];
+
+// 点位类型选项
+export const pointTypeOptions = [
+  {value: 'teleport', label: '传送'},
+  {value: 'path', label: '途经'},
+  {value: 'target', label: '目标'},
+  {value: 'orientation', label: '朝向'},
+];
+
 // 点位动作级联选项
 export const actionOptionsTree = [
   {label: '无', value: ''},
