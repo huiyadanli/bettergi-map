@@ -16,6 +16,16 @@ import ComfortSelect from './ComfortSelect.vue';
 
 const sourceId = ref('');
 const fields = ref(createDefaultFields());
+const allFieldsSelected = computed({
+  get: () => Object.values(fields.value).every(Boolean),
+  set: (selected) => {
+    Object.keys(fields.value).forEach((key) => fields.value[key] = selected);
+  },
+});
+const fieldsIndeterminate = computed(() => {
+  const selectedCount = Object.values(fields.value).filter(Boolean).length;
+  return selectedCount > 0 && selectedCount < Object.keys(fields.value).length;
+});
 
 const sourceOptions = computed(() => (selectedPolyline.value?.positions || [])
   .map((position) => ({
@@ -82,6 +92,7 @@ function confirmOverride() {
       </a-form-item>
       <a-form-item label="覆盖内容" required>
         <a-space class="data-override-fields" wrap>
+          <a-checkbox v-model="allFieldsSelected" :indeterminate="fieldsIndeterminate">全部</a-checkbox>
           <a-checkbox v-model="fields.coordinate">坐标</a-checkbox>
           <a-checkbox v-model="fields.type">类型</a-checkbox>
           <a-checkbox v-model="fields.moveMode">移动方式</a-checkbox>
