@@ -136,14 +136,17 @@ export const columns = computed(() => [
 // 战斗策略列表
 export const combatScriptData = ref(loadLocal(COMBAT_SCRIPT_KEY) || []);
 
-// 是否显示添加战斗策略弹窗
-export const showAddCombatScript = ref(false);
-
 // 是否显示战斗策略管理弹窗
 export const showCombatScriptManagerModal = ref(false);
 
-// 新战斗策略表单
-export const newActionParams = ref({value: '', def: false});
+// 是否显示简易策略脚本代码编辑弹窗
+export const showCombatScriptEditorModal = ref(false);
+
+// 打开代码编辑弹窗时复制的脚本初始值
+export const combatScriptEditorValue = ref('');
+
+// 代码编辑弹窗用途：编辑点位脚本或新增策略预设
+export const combatScriptEditorMode = ref('point');
 
 // 当前编辑的点位扩展参数
 export const pointExtParams = ref(Object.assign({}, defaultPointExtParams));

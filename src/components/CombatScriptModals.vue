@@ -1,19 +1,17 @@
 <script setup>
 /**
- * 战斗策略管理与新增弹窗。
+ * 战斗策略管理弹窗。
  *
- * 只编辑本地策略列表，不改路线点位。
+ * 只编辑本地策略列表；新增操作交给共享脚本编辑弹窗。
  */
 import {combatScriptColumns} from '../constants/editor';
 import {
   showCombatScriptManagerModal,
-  showAddCombatScript,
   combatScriptData,
-  newActionParams,
 } from '../stores/editor';
 import {
   saveCombatScript,
-  addCombatScript,
+  openCombatScriptPresetEditor,
   deleteCombatScriptPosition,
   changeCombatScriptDef,
 } from '../composables/useCombatScripts';
@@ -46,25 +44,10 @@ import {
           </template>
         </a-table>
         <template #extra>
-          <a-button @click="showAddCombatScript = true" type="primary" size="small" style="margin-left: 20px;">添加
+          <a-button @click="openCombatScriptPresetEditor" type="primary" size="small" style="margin-left: 20px;">添加
           </a-button>
         </template>
       </a-card>
     </a-space>
-  </a-modal>
-  <a-modal
-      v-model:visible="showAddCombatScript"
-      title="添加战斗策略"
-      @ok="addCombatScript"
-      @cancel="showAddCombatScript = false"
-  >
-    <a-form :model="newActionParams">
-      <a-form-item label="策略参数">
-        <a-input v-model="newActionParams.value" allow-clear/>
-      </a-form-item>
-      <a-form-item label="是否默认">
-        <a-checkbox :value="true" v-model="newActionParams.def"></a-checkbox>
-      </a-form-item>
-    </a-form>
   </a-modal>
 </template>

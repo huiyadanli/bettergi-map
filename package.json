@@ -12,7 +12,9 @@
     "generate-tiles": "node scripts/generate-tiles.js"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@geoman-io/leaflet-geoman-free": "^2.17.0",
+    "codemirror": "^6.0.2",
     "leaflet": "^1.9.4",
     "vue": "^3.4.29"
   },
