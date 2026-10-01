@@ -4,18 +4,69 @@
  * 只维护本地策略列表和点位 action 默认值，不修改路线几何。
  */
 import {saveLocal} from '../utils/storage';
+import {Message} from '@arco-design/web-vue';
 import {COMBAT_SCRIPT_KEY} from '../constants/editor';
 import {
   combatScriptData,
   showCombatScriptManagerModal,
-  newActionParams,
+  combatScriptEditorValue,
+  combatScriptEditorMode,
+  showCombatScriptEditorModal,
 } from '../stores/editor';
+
+let editingCombatScriptRecord = null;
 
 /**
  * 打开战斗策略管理弹窗。
  */
 export function combatScriptManagerModal() {
   showCombatScriptManagerModal.value = true;
+}
+
+/**
+ * 用点位当前参数打开独立脚本编辑器。
+ */
+export function openCombatScriptEditor(record) {
+  editingCombatScriptRecord = record;
+  combatScriptEditorMode.value = 'point';
+  combatScriptEditorValue.value = record?.action_params || '';
+  showCombatScriptEditorModal.value = true;
+}
+
+/**
+ * 使用同一个代码编辑弹窗新增策略预设。
+ */
+export function openCombatScriptPresetEditor() {
+  editingCombatScriptRecord = null;
+  combatScriptEditorMode.value = 'preset';
+  combatScriptEditorValue.value = '';
+  showCombatScriptEditorModal.value = true;
+}
+
+/**
+ * 按弹窗用途保存脚本；新增的策略始终不是默认策略。
+ */
+export function saveCombatScriptEditor(value) {
+  if (combatScriptEditorMode.value === 'preset') {
+    if (combatScriptData.value.find((item) => item.value === value)) {
+      Message.warning('该战斗策略已存在，请勿重复添加');
+      return false;
+    }
+    combatScriptData.value = [...combatScriptData.value, {value, def: false}];
+    saveLocal(COMBAT_SCRIPT_KEY, combatScriptData.value);
+    return true;
+  }
+
+  if (editingCombatScriptRecord) editingCombatScriptRecord.action_params = value;
+  return true;
+}
+
+/**
+ * 关闭编辑器并释放当前点位引用。
+ */
+export function closeCombatScriptEditor() {
+  showCombatScriptEditorModal.value = false;
+  editingCombatScriptRecord = null;
 }
 
 /**
@@ -40,26 +91,6 @@ export function actionChange(record) {
     record.action_params = '100';
   } else {
     record.action_params = '';
-  }
-}
-
-/**
- * 新增一条战斗策略，默认项互斥。
- */
-export function addCombatScript() {
-  const newActionParamsTemp = Object.assign({}, newActionParams.value);
-  if (combatScriptData.value.find((item) => item.value === newActionParamsTemp.value)) {
-    alert('不要重复添加！');
-  } else {
-    const temp = combatScriptData.value;
-    if (newActionParamsTemp.def) {
-      temp.forEach((item) => {
-        item.def = false;
-      });
-    }
-    newActionParams.value = {value: '', def: false};
-    combatScriptData.value = [...temp, newActionParamsTemp];
-    saveLocal(COMBAT_SCRIPT_KEY, combatScriptData.value);
   }
 }
 

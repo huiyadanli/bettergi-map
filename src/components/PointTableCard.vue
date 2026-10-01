@@ -35,7 +35,7 @@ import {
   openAddPointModal,
 } from '../composables/useRoutes';
 import {undoStep, redoStep} from '../composables/useHistory';
-import {actionChange, combatScriptManagerModal} from '../composables/useCombatScripts';
+import {actionChange, combatScriptManagerModal, openCombatScriptEditor} from '../composables/useCombatScripts';
 import {editPointExtParams, deletePointExtParams} from '../composables/usePointExtParams';
 
 const tableWrapElement = ref(null);
@@ -409,8 +409,25 @@ function handleTableMouseCancel() {
             >
               <template #suffix>秒</template>
             </a-input-number>
-            <a-auto-complete allow-clear :data="combatScriptData" v-if="record.action === 'combat_script'"
-                             v-model="record.action_params" placeholder="录入或选择策略"/>
+            <div v-if="record.action === 'combat_script'" class="combat-script-field">
+              <a-auto-complete
+                  v-model="record.action_params"
+                  class="combat-script-quick-input"
+                  :data="combatScriptData"
+                  allow-clear
+                  placeholder="录入或选择策略"
+              />
+              <a-tooltip content="打开脚本编辑器">
+                <a-button
+                    class="combat-script-editor-button"
+                    type="secondary"
+                    aria-label="打开简易策略脚本编辑器"
+                    @click.stop="openCombatScriptEditor(record)"
+                >
+                  <template #icon><icon-code-block/></template>
+                </a-button>
+              </a-tooltip>
+            </div>
           </div>
         </template>
         <template #type="{ record }">
@@ -784,6 +801,26 @@ function handleTableMouseCancel() {
 .action-cell :deep(.arco-input-wrapper),
 .action-cell :deep(.arco-input-number) {
   width: 100%;
+}
+
+.combat-script-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.combat-script-quick-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.combat-script-editor-button {
+  flex: 0 0 30px;
+  width: 30px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0;
 }
 
 .table-wrap :deep(.arco-input-wrapper) {
