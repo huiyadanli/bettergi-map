@@ -5,7 +5,13 @@
  * 负责点位编辑、运行、合并拆分和打开相关弹窗。
  */
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
-import {actionOptionsTree, COORDINATE_PRECISION, normalizeCoordinate} from '../constants/editor';
+import {
+  actionOptionsTree,
+  COORDINATE_PRECISION,
+  moveModeOptions,
+  normalizeCoordinate,
+  pointTypeOptions,
+} from '../constants/editor';
 import ComfortSelect from './ComfortSelect.vue';
 import {
   columns,
@@ -37,6 +43,7 @@ import {
 import {undoStep, redoStep} from '../composables/useHistory';
 import {actionChange, combatScriptManagerModal, openCombatScriptEditor} from '../composables/useCombatScripts';
 import {editPointExtParams, deletePointExtParams} from '../composables/usePointExtParams';
+import {openDataOverrideModal} from '../composables/useDataOverride';
 
 const tableWrapElement = ref(null);
 const tableBodyHeight = ref(240);
@@ -45,22 +52,6 @@ let mouseDrag = null;
 let suppressRowClickUntil = 0;
 let previousBodyCursor = '';
 let previousBodyUserSelect = '';
-
-const moveModeOptions = [
-  {value: 'walk', label: '行走'},
-  {value: 'dash', label: '间歇冲刺'},
-  {value: 'run', label: '持续奔跑'},
-  {value: 'fly', label: '飞行'},
-  {value: 'swim', label: '游泳'},
-  {value: 'climb', label: '攀爬'},
-  {value: 'jump', label: '跳跃'},
-];
-const pointTypeOptions = [
-  {value: 'teleport', label: '传送'},
-  {value: 'path', label: '途经'},
-  {value: 'target', label: '目标'},
-  {value: 'orientation', label: '朝向'},
-];
 
 function syncTableBodyHeight() {
   const wrap = tableWrapElement.value;
@@ -457,6 +448,12 @@ function handleTableMouseCancel() {
               </a-button>
               <template #content>
                 <a-doption :value="{ onclick: copyPosition, record, rowIndex }">复制点位</a-doption>
+                <a-doption
+                    :disabled="selectedPolyline.positions.length < 2"
+                    :value="{ onclick: openDataOverrideModal, record, rowIndex }"
+                >
+                  数据覆盖
+                </a-doption>
                 <a-doption :value="{ onclick: editPointExtParams, record, rowIndex }">
                   {{ record.point_ext_params ? '修改扩展参数' : '新增扩展参数' }}
                 </a-doption>

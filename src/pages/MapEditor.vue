@@ -14,6 +14,7 @@ import AuthorSelectModal from '../components/AuthorSelectModal.vue';
 import CombatScriptModals from '../components/CombatScriptModals.vue';
 import CombatScriptEditorModal from '../components/CombatScriptEditorModal.vue';
 import PointExtParamsModal from '../components/PointExtParamsModal.vue';
+import DataOverrideModal from '../components/DataOverrideModal.vue';
 import RouteSettingsModal from '../components/RouteSettingsModal.vue';
 import PointCoordModals from '../components/PointCoordModals.vue';
 import RouteMergeModal from '../components/RouteMergeModal.vue';
@@ -201,6 +202,7 @@ useEditorLifecycle();
     </div>
   </AppLayout>
   <PointExtParamsModal/>
+  <DataOverrideModal/>
   <CombatScriptModals/>
   <CombatScriptEditorModal/>
   <RouteSettingsModal/>
