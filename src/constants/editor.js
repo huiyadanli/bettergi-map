@@ -20,7 +20,7 @@ export function normalizeCoordinate(value) {
 
 export function parseSetTimeParam(value) {
   if (typeof value !== 'string') return null;
-  const matched = /^(\d{1,2}):(\d{1,2})(?::(true|false))?$/i.exec(value.trim());
+  const matched = /^(\d{1,2}):(\d{1,2})(?::(true|false))?$/i.exec(value.trim().replace(/：/g, ':'));
   if (!matched) return null;
   const hour = Number(matched[1]);
   const minute = Number(matched[2]);
