@@ -18,6 +18,21 @@ export function normalizeCoordinate(value) {
   return Math.round(Number(value) * COORDINATE_SCALE) / COORDINATE_SCALE;
 }
 
+export function parseSetTimeParam(value) {
+  if (typeof value !== 'string') return null;
+  const matched = /^(\d{1,2}):(\d{1,2})(?::(true|false))?$/i.exec(value.trim());
+  if (!matched) return null;
+  const hour = Number(matched[1]);
+  const minute = Number(matched[2]);
+  if (hour > 23 || minute > 59) return null;
+  return {hour, minute, flag: matched[3] ? matched[3].toLowerCase() : null};
+}
+
+export function formatSetTimeParam({hour, minute, flag}, withFlag = true) {
+  const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return withFlag && flag ? `${time}:${flag}` : time;
+}
+
 // 点位表格基础列；运行列由 editor store 统一插入。
 export const columnsBase = [
   {title: '#', dataIndex: 'id', slotName: 'id', width: 88},

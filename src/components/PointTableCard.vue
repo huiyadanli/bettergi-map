@@ -5,7 +5,7 @@
  * 负责点位编辑、运行、合并拆分和打开相关弹窗。
  */
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
-import {actionOptionsTree, COORDINATE_PRECISION, normalizeCoordinate} from '../constants/editor';
+import {actionOptionsTree, COORDINATE_PRECISION, formatSetTimeParam, normalizeCoordinate, parseSetTimeParam} from '../constants/editor';
 import ComfortSelect from './ComfortSelect.vue';
 import {
   columns,
@@ -115,6 +115,39 @@ function handleGadgetWaitChange(record, value) {
   }
   const seconds = Number(value);
   if (Number.isFinite(seconds)) record.action_params = String(seconds);
+}
+
+let setTimeTypedText = null;
+
+function setTimeValue(actionParams) {
+  const parsed = parseSetTimeParam(actionParams);
+  return parsed ? formatSetTimeParam(parsed, false) : undefined;
+}
+
+function handleSetTimeInput(event) {
+  if (event.target instanceof HTMLInputElement) setTimeTypedText = event.target.value;
+}
+
+function commitSetTimeText(record) {
+  const typed = setTimeTypedText;
+  setTimeTypedText = null;
+  const parsed = parseSetTimeParam(typed);
+  if (!parsed) return;
+  const time = formatSetTimeParam(parsed);
+  if (time !== record.action_params) record.action_params = time;
+}
+
+function handleSetTimeChange(record, value) {
+  setTimeTypedText = null;
+  const parsed = parseSetTimeParam(value);
+  if (!parsed) {
+    if (value === '' || value == null) record.action_params = '';
+    return;
+  }
+
+  parsed.flag = parseSetTimeParam(record.action_params)?.flag ?? parsed.flag;
+  const time = formatSetTimeParam(parsed);
+  if (time !== record.action_params) record.action_params = time;
 }
 
 function tableRows() {
@@ -392,8 +425,21 @@ function handleTableMouseCancel() {
                      :disabled="record.type === 'teleport'" placeholder="录入需要输出的日志"/>
             <a-input allow-clear v-if="record.action === 'stop_flying'" v-model="record.action_params"
                      placeholder="下落攻击等待时间（毫秒）"/>
-            <a-input allow-clear v-if="record.action === 'set_time'" v-model="record.action_params"
-                     placeholder="设置时间 HH:MM"/>
+            <div v-if="record.action === 'set_time'"
+                 @input="handleSetTimeInput"
+                 @focusout="commitSetTimeText(record)"
+                 @keydown.enter="commitSetTimeText(record)">
+              <a-time-picker
+                  :model-value="setTimeValue(record.action_params)"
+                  format="HH:mm"
+                  size="small"
+                  disable-confirm
+                  placeholder="设置时间 HH:MM"
+                  aria-label="设置游戏内时间"
+                  :trigger-props="{contentClass: 'set-time-picker-panel'}"
+                  @change="(value) => handleSetTimeChange(record, value)"
+              />
+            </div>
             <a-input allow-clear v-if="record.action === 'linnea_mining'" v-model="record.action_params"
                      placeholder="射箭次数，旋转寻矿次数"/>
             <a-input-number
@@ -799,8 +845,31 @@ function handleTableMouseCancel() {
 }
 
 .action-cell :deep(.arco-input-wrapper),
-.action-cell :deep(.arco-input-number) {
+.action-cell :deep(.arco-input-number),
+.action-cell :deep(.arco-picker) {
   width: 100%;
+}
+
+:global(.set-time-picker-panel .arco-timepicker-column ul::after) {
+  height: 0;
+}
+
+:global(.set-time-picker-panel .arco-timepicker-column::-webkit-scrollbar) {
+  width: 6px;
+}
+
+:global(.set-time-picker-panel .arco-timepicker-column::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:global(.set-time-picker-panel .arco-timepicker-column::-webkit-scrollbar-thumb) {
+  border-radius: 999px;
+  background: rgba(104, 123, 145, 0.52);
+}
+
+:global(.set-time-picker-panel .arco-timepicker-column::-webkit-scrollbar-button) {
+  display: none;
+  height: 0;
 }
 
 .combat-script-field {
