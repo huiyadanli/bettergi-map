@@ -4,9 +4,9 @@
  * 只快照选中路线的点位和元信息，不处理地图实例生命周期。
  */
 import {watch, nextTick} from 'vue';
-import L from 'leaflet';
 import {Message} from '@arco-design/web-vue';
 import {MAX_HISTORY} from '../constants/editor';
+import {updateMapFromPolyLine} from './useRoutes';
 import {
   polylines,
   selectedPolylineIndex,
@@ -15,7 +15,6 @@ import {
   canUndo,
   canRedo,
   selectedPointIndex,
-  coordinateConverter,
   map,
   highlightMarker,
 } from '../stores/editor';
@@ -148,14 +147,8 @@ export function restoreFromHistory(pointer) {
   polyline.tags = snapshot.tags;
   polyline.enable_monster_loot_split = snapshot.enable_monster_loot_split;
   polyline.map_match_method = snapshot.map_match_method;
-  const latlngs = snapshot.positions.map((pos) => {
-    const main1024Pos = coordinateConverter.value.gameToMain1024(pos.x, pos.y);
-    return L.latLng(main1024Pos.y, main1024Pos.x);
-  });
-  if (typeof polyline.layer?.setLatLngs === 'function') {
-    polyline.layer.setLatLngs(latlngs);
-  }
   clearRestoredPointSelection();
+  updateMapFromPolyLine(polyline);
   nextTick(() => {
     isRestoring = false;
   });

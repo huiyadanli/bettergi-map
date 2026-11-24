@@ -5,7 +5,7 @@
  * 编辑怪物标签和异常识别策略。
  */
 import {showPointExtConfig, pointExtParams} from '../stores/editor';
-import {savePointExtParams} from '../composables/usePointExtParams';
+import {cancelPointExtParams, savePointExtParams} from '../composables/usePointExtParams';
 import ComfortSelect from './ComfortSelect.vue';
 
 const monsterTagOptions = [
@@ -29,7 +29,7 @@ const handlingModeOptions = [
       v-model:visible="showPointExtConfig"
       title="扩展参数"
       @ok="savePointExtParams"
-      @cancel="showPointExtConfig = false"
+      @cancel="cancelPointExtParams"
       width="min(720px, calc(100vw - 32px))"
   >
     <a-form class="ext-params-form" size="mini" :model="pointExtParams" auto-label-width>

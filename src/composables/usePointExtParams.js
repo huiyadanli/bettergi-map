@@ -4,37 +4,78 @@
  * 只读写 point_ext_params，不改点位坐标或路线结构。
  */
 import {defaultPointExtParams} from '../constants/editor';
-import {pointExtParams, showPointExtConfig} from '../stores/editor';
+import {
+  pointExtParams,
+  polylines,
+  selectedPolylineIndex,
+  showPointExtConfig,
+} from '../stores/editor';
+import {snapshotPolyline} from './useHistory';
 
 // 当前正在编辑扩展参数的点位记录
-let curPointRecord;
+let editingSession;
+
+function openPointExtParams(records, source) {
+  editingSession = {route: polylines.value[selectedPolylineIndex.value], records};
+  pointExtParams.value = JSON.parse(JSON.stringify(source));
+  showPointExtConfig.value = true;
+}
 
 /**
  * 打开扩展参数弹窗，没有旧值时用默认结构。
  */
 export function editPointExtParams(record) {
-  // The form is edited through v-model.  Always give it its own object so a
-  // cancelled dialog cannot mutate the point that opened it (a shallow copy is
-  // not enough because misidentification is nested).
   const source = record?.point_ext_params || defaultPointExtParams;
-  pointExtParams.value = JSON.parse(JSON.stringify(source));
-  showPointExtConfig.value = true;
-  curPointRecord = record;
+  openPointExtParams([record], {
+    ...defaultPointExtParams,
+    ...source,
+    misidentification: {...defaultPointExtParams.misidentification, ...source.misidentification},
+  });
+}
+
+/**
+ * 批量表单从空值开始，确认后完整替换每个目标的扩展参数。
+ */
+export function editBatchPointExtParams(records) {
+  if (!records.length) return;
+  openPointExtParams(records, {
+    misidentification: {type: [], handling_mode: '', arrival_time: null},
+    description: '',
+    monster_tag: '',
+  });
 }
 
 /**
  * 把弹窗里的扩展参数写回当前点位。
  */
 export function savePointExtParams() {
-  // The modal emits cancel without calling this function, but also guard the
-  // visibility state so a stale callback after cancellation cannot commit the
-  // draft to the record.
-  if (curPointRecord && showPointExtConfig.value) {
-    curPointRecord.point_ext_params = JSON.parse(JSON.stringify(pointExtParams.value));
+  const session = editingSession;
+  editingSession = undefined;
+  const route = polylines.value[selectedPolylineIndex.value];
+  if (!session || !route || !showPointExtConfig.value || session.route !== route) return;
+
+  const targets = session.records.filter((record) => session.route.positions.includes(record));
+  if (!targets.length) return;
+
+  const {misidentification, ...fields} = pointExtParams.value;
+  const draft = JSON.stringify({
+    ...fields,
+    misidentification: {
+      ...misidentification,
+      // 宿主用整数读取该字段，空值用 0 表示，不能导出 null。
+      arrival_time: misidentification.arrival_time ?? 0,
+    },
+  });
+  snapshotPolyline();
+  for (const record of targets) {
+    record.point_ext_params = JSON.parse(draft);
   }
-  // Do not retain a reference to a record after the dialog is closed.  The
-  // next open will always establish a fresh editing session.
-  curPointRecord = undefined;
+  snapshotPolyline();
+}
+
+export function cancelPointExtParams() {
+  editingSession = undefined;
+  showPointExtConfig.value = false;
 }
 
 /**

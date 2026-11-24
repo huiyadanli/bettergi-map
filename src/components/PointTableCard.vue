@@ -4,9 +4,11 @@
  *
  * 负责点位编辑、运行、合并拆分和打开相关弹窗。
  */
-import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
+import {Modal} from '@arco-design/web-vue';
 import {actionOptionsTree, COORDINATE_PRECISION, formatSetTimeParam, normalizeCoordinate, parseSetTimeParam} from '../constants/editor';
 import ComfortSelect from './ComfortSelect.vue';
+import PointContextMenu from './PointContextMenu.vue';
 import {
   columns,
   selectedPolyline,
@@ -24,6 +26,8 @@ import {
   setPositionRowClass,
   updatePosition,
   deletePosition,
+  deleteSelectedPoints,
+  createRouteFromPoints,
   copyPosition,
   moreSelect,
   lockRowIndex,
@@ -36,10 +40,41 @@ import {
 } from '../composables/useRoutes';
 import {undoStep, redoStep} from '../composables/useHistory';
 import {actionChange, combatScriptManagerModal, openCombatScriptEditor} from '../composables/useCombatScripts';
-import {editPointExtParams, deletePointExtParams} from '../composables/usePointExtParams';
+import {
+  editBatchPointExtParams,
+  editPointExtParams,
+  deletePointExtParams,
+} from '../composables/usePointExtParams';
 
 const tableWrapElement = ref(null);
 const tableBodyHeight = ref(240);
+const contextTarget = ref(null);
+const multiSelect = ref(false);
+const checkedPoints = ref(new Set());
+const route = computed(() => polylines.value[selectedPolylineIndex.value]);
+const selectedPoints = computed(() => selectedPolyline.value.positions.filter(
+  (record) => checkedPoints.value.has(record),
+));
+const allPointsChecked = computed(() => (
+  selectedPoints.value.length > 0
+  && selectedPoints.value.length === selectedPolyline.value.positions.length
+));
+const contextItems = computed(() => {
+  const items = [
+    {id: 'copy', label: '复制'},
+    {id: 'multiple', label: '多选'},
+    {id: 'locate', label: '定位'},
+  ];
+  if (contextTarget.value?.record.point_ext_params) {
+    items.push({id: 'params', label: '修改扩展参数'});
+    items.push({id: 'clear-params', label: '删除扩展参数'});
+  } else {
+    items.push({id: 'params', label: '新增扩展参数'});
+  }
+  items.push({id: 'delete', label: '删除', danger: true});
+  return items;
+});
+let contextOpener = null;
 let tableResizeObserver = null;
 let mouseDrag = null;
 let suppressRowClickUntil = 0;
@@ -84,13 +119,143 @@ onBeforeUnmount(() => {
   finishMouseDrag(false);
 });
 
+watch(route, () => {
+  closeContextMenu();
+  exitMultiSelect();
+});
+
+watch(() => route.value?.positions, () => {
+  if (contextTarget.value && !route.value?.positions.includes(contextTarget.value.record)) {
+    closeContextMenu();
+  }
+});
+
+watch(selectedPoints, (records) => {
+  if (!multiSelect.value) return;
+  if (!selectedPolyline.value.positions.length) exitMultiSelect();
+  else if (records.length !== checkedPoints.value.size) checkedPoints.value = new Set(records);
+});
+
+function openContextMenu(record, event) {
+  if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable]')) {
+    return;
+  }
+  event.preventDefault();
+  if (!contextTarget.value) contextOpener = document.activeElement;
+  const keyboardAnchor = event.clientX === 0 && event.clientY === 0
+    ? event.target.getBoundingClientRect()
+    : null;
+  contextTarget.value = {
+    record,
+    x: keyboardAnchor?.left ?? event.clientX,
+    y: keyboardAnchor?.bottom ?? event.clientY,
+  };
+}
+
+function closeContextMenu(restoreFocus = false) {
+  const opener = contextOpener;
+  contextTarget.value = null;
+  contextOpener = null;
+  if (!restoreFocus) return;
+
+  const focusTarget = opener instanceof HTMLElement && opener.isConnected && opener !== document.body
+    ? opener
+    : tableWrapElement.value;
+  focusTarget?.focus({preventScroll: true});
+}
+
+function handleContextAction(action) {
+  const record = contextTarget.value?.record;
+  const index = route.value?.positions.indexOf(record) ?? -1;
+  closeContextMenu(action !== 'params');
+  if (index < 0) return;
+
+  switch (action) {
+    case 'copy':
+      copyPosition(record, index);
+      break;
+    case 'multiple':
+      multiSelect.value = true;
+      checkedPoints.value.add(record);
+      clearSelection();
+      break;
+    case 'locate':
+      selectPoint(record);
+      break;
+    case 'params':
+      editPointExtParams(record);
+      break;
+    case 'clear-params':
+      deletePointExtParams(record);
+      break;
+    case 'delete':
+      deletePosition(index);
+      break;
+  }
+}
+
+function exitMultiSelect() {
+  multiSelect.value = false;
+  checkedPoints.value.clear();
+}
+
+function handleEscape(event) {
+  if (!multiSelect.value || event.defaultPrevented) return;
+  exitMultiSelect();
+  tableWrapElement.value?.focus({preventScroll: true});
+}
+
+function setChecked(record, checked) {
+  if (checked) {
+    checkedPoints.value.add(record);
+    return;
+  }
+  checkedPoints.value.delete(record);
+}
+
+function toggleAllPoints() {
+  if (allPointsChecked.value) checkedPoints.value.clear();
+  else checkedPoints.value = new Set(selectedPolyline.value.positions);
+}
+
+function confirmRemoveCheckedPoints() {
+  const targetRoute = route.value;
+  const targets = selectedPoints.value;
+  if (!targetRoute || !targets.length) return;
+
+  Modal.confirm({
+    title: '删除选中的点位？',
+    content: `将删除 ${targets.length} 个点位。`,
+    okText: '删除',
+    cancelText: '取消',
+    okButtonProps: {status: 'danger'},
+    onOk: () => {
+      if (route.value !== targetRoute) return;
+
+      deleteSelectedPoints(targets);
+      exitMultiSelect();
+      tableWrapElement.value?.focus({preventScroll: true});
+    },
+  });
+}
+
+function createSelectedRoute() {
+  if (createRouteFromPoints(selectedPoints.value)) tableWrapElement.value?.focus({preventScroll: true});
+}
+
+function pointRowClass(record, index) {
+  const classes = setPositionRowClass(record, index);
+  return multiSelect.value && checkedPoints.value.has(record) ? `${classes} batch-selected` : classes;
+}
+
 function handleRowClick(record, event) {
   if (performance.now() < suppressRowClickUntil) return;
   const target = event?.target;
   if (target instanceof Element && target.closest(
-    'button, input, textarea, [role="button"], [role="combobox"], .arco-trigger, .arco-input-wrapper',
+    'button, input, textarea, label, [role="button"], [role="combobox"], .arco-trigger, .arco-input-wrapper',
   )) return;
-  selectPoint(record);
+  if (multiSelect.value) setChecked(record, !checkedPoints.value.has(record));
+  else selectPoint(record);
 }
 
 function handleCoordinateChange(record, rowIndex, key, value) {
@@ -163,6 +328,7 @@ function clearDragPreview() {
 }
 
 function handleTableMouseDown(event) {
+  if (multiSelect.value) return;
   if (event.button !== 0 || mouseDrag) return;
   const rows = tableRows();
   const target = event.target instanceof Element ? event.target : null;
@@ -267,7 +433,7 @@ function handleTableMouseCancel() {
 </script>
 
 <template>
-  <a-card class="point-table-card" :bordered="false">
+  <a-card class="point-table-card" :bordered="false" @keydown.esc="handleEscape">
     <template #title>
       <div class="section-heading">
         <span class="section-heading-main">点位编辑</span>
@@ -275,7 +441,37 @@ function handleTableMouseCancel() {
     </template>
 
     <template #extra>
-      <div class="point-header-actions">
+      <div v-if="multiSelect" class="point-header-actions">
+        <a-button type="text" size="small" @click="toggleAllPoints">
+          {{ allPointsChecked ? '取消全选' : '全选' }}
+        </a-button>
+        <a-button
+            type="text"
+            size="small"
+            :disabled="!selectedPoints.length"
+            @click="editBatchPointExtParams(selectedPoints)"
+        >
+          扩展参数
+        </a-button>
+        <a-button
+            type="text"
+            size="small"
+            :disabled="!selectedPoints.length"
+            @click="createSelectedRoute"
+        >
+          创建路线
+        </a-button>
+        <a-button
+            type="text"
+            size="small"
+            status="danger"
+            :disabled="!selectedPoints.length"
+            @click="confirmRemoveCheckedPoints"
+        >
+          删除
+        </a-button>
+      </div>
+      <div v-else class="point-header-actions">
         <a-button @click="openAddPointModal" type="primary" size="small">
           <template #icon><icon-plus/></template>
           添加点位
@@ -340,6 +536,8 @@ function handleTableMouseCancel() {
     <div
         ref="tableWrapElement"
         class="table-wrap"
+        :class="{'is-multi-select': multiSelect}"
+        tabindex="-1"
         @mousedown.capture="handleTableMouseDown"
         @dragstart.capture.prevent
     >
@@ -347,14 +545,16 @@ function handleTableMouseCancel() {
           :columns="columns"
           :data="selectedPolyline.positions"
           :pagination="false"
+          :hoverable="!multiSelect"
           :scroll="{ x: 924, y: tableBodyHeight }"
           :sticky-header="true"
           size="small"
           @row-click="handleRowClick"
-          :row-class="setPositionRowClass"
+          @row-contextmenu="openContextMenu"
+          :row-class="pointRowClass"
       >
         <template #drag>
-          <span class="drag-handle" title="按住此行拖动排序" aria-hidden="true">
+          <span v-if="!multiSelect" class="drag-handle" title="按住此行拖动排序" aria-hidden="true">
             <icon-drag-dot-vertical/>
           </span>
         </template>
@@ -374,7 +574,12 @@ function handleTableMouseCancel() {
           </div>
         </template>
         <template #xy="{ record, rowIndex }">
-          <div class="coord-editor" @click.stop @mousedown.stop @dragstart.stop.prevent>
+          <div
+              class="coord-editor"
+              @click="!multiSelect && $event.stopPropagation()"
+              @mousedown.stop
+              @dragstart.stop.prevent
+          >
             <label class="coord-input coord-x">
               <span>X</span>
               <a-input-number
@@ -411,7 +616,7 @@ function handleTableMouseCancel() {
           />
         </template>
         <template #action="{ record }">
-          <div class="action-cell" @click.stop>
+          <div class="action-cell" @click="!multiSelect && $event.stopPropagation()">
             <ComfortSelect
                 v-model="record.action"
                 class="action-select"
@@ -486,17 +691,28 @@ function handleTableMouseCancel() {
           />
         </template>
         <template #operations="{ record, rowIndex }">
-          <div class="row-actions" @click.stop>
-            <a-popconfirm
-                :content="`确定删除第 ${rowIndex + 1} 个点位吗？`"
-                okText="删除"
-                cancelText="取消"
-                @ok="deletePosition(rowIndex)"
+          <div v-if="multiSelect" class="row-actions">
+            <label class="point-checkbox" @click.stop>
+              <input
+                  type="checkbox"
+                  :checked="checkedPoints.has(record)"
+                  :aria-label="`选择第 ${rowIndex + 1} 个点位`"
+                  @change="setChecked(record, $event.target.checked)"
+              />
+              <span class="point-checkbox-mark" aria-hidden="true"><icon-check/></span>
+            </label>
+          </div>
+          <div v-else class="row-actions" @click.stop>
+            <a-button
+                class="row-icon-button danger"
+                type="text"
+                status="danger"
+                size="small"
+                aria-label="删除点位"
+                @click="deletePosition(rowIndex)"
             >
-              <a-button class="row-icon-button danger" type="text" status="danger" size="small" aria-label="删除点位">
-                <template #icon><icon-delete/></template>
-              </a-button>
-            </a-popconfirm>
+              <template #icon><icon-delete/></template>
+            </a-button>
             <a-dropdown @select="moreSelect">
               <a-button class="row-icon-button" type="text" size="small" aria-label="更多点位操作">
                 <template #icon><icon-more-vertical/></template>
@@ -507,7 +723,7 @@ function handleTableMouseCancel() {
                   {{ record.point_ext_params ? '修改扩展参数' : '新增扩展参数' }}
                 </a-doption>
                 <a-doption v-if="record.point_ext_params" :value="{ onclick: deletePointExtParams, record, rowIndex }">
-                  清除扩展参数
+                  删除扩展参数
                 </a-doption>
                 <a-doption v-if="!record.locked" :value="{ onclick: lockRowIndex, record, rowIndex }">锁定插入位置</a-doption>
                 <a-doption v-else :value="{ onclick: unlockRowIndex, record, rowIndex }">解除锁定</a-doption>
@@ -539,6 +755,12 @@ function handleTableMouseCancel() {
         </template>
       </a-table>
     </div>
+    <PointContextMenu
+        :anchor="contextTarget"
+        :items="contextItems"
+        @dismiss="closeContextMenu"
+        @select="handleContextAction"
+    />
   </a-card>
 </template>
 
@@ -674,7 +896,7 @@ function handleTableMouseCancel() {
   transition: transform 160ms cubic-bezier(.22, .8, .3, 1), filter 160ms ease, opacity 120ms ease;
 }
 
-.table-wrap :deep(.arco-table-tr.point-row .arco-table-td:nth-child(-n + 2)) {
+.table-wrap:not(.is-multi-select) :deep(.arco-table-tr.point-row .arco-table-td:nth-child(-n + 2)) {
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -718,6 +940,26 @@ function handleTableMouseCancel() {
 
 .table-wrap :deep(.arco-table-tr.locked.selected-row .arco-table-td) {
   background: #ffe2a3 !important;
+}
+
+.table-wrap :deep(.arco-table-tr.batch-selected .arco-table-td) {
+  background: #dcecff !important;
+}
+
+.table-wrap.is-multi-select :deep(.arco-table-tr.point-row) {
+  cursor: pointer;
+}
+
+.table-wrap.is-multi-select :deep(.arco-table-tr.point-row:not(.locked):hover .arco-table-td) {
+  background: #edf5ff;
+}
+
+.table-wrap.is-multi-select :deep(.arco-table-tr.batch-selected:hover .arco-table-td) {
+  background: #cfe4ff !important;
+}
+
+.table-wrap:focus {
+  outline: none;
 }
 
 .drag-handle {
@@ -902,6 +1144,73 @@ function handleTableMouseCancel() {
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
+}
+
+.point-checkbox {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.table-wrap .point-checkbox input[type="checkbox"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.point-checkbox-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  place-items: center;
+  border: 1px solid #839bb8;
+  border-radius: 5px;
+  color: #fff;
+  background: rgb(255 255 255 / 80%);
+  font-size: 13px;
+  pointer-events: none;
+  transition: background-color 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+}
+
+.point-checkbox-mark svg {
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+
+.point-checkbox:hover .point-checkbox-mark {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgb(22 93 255 / 10%);
+}
+
+.point-checkbox input:checked + .point-checkbox-mark {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.point-checkbox input:checked + .point-checkbox-mark svg {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.point-checkbox input:focus-visible + .point-checkbox-mark {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .point-checkbox-mark,
+  .point-checkbox-mark svg {
+    transition: none;
+  }
 }
 
 .row-icon-button {
