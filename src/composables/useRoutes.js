@@ -671,6 +671,57 @@ export function handleChange(newData) {
 }
 
 /**
+ * 从当前路线移除所选点位，作为一次可撤销的操作。
+ */
+export function deleteSelectedPoints(records) {
+  const route = polylines.value[selectedPolylineIndex.value];
+  if (!route) return;
+
+  const selected = new Set(records);
+  const remaining = route.positions.filter((record) => !selected.has(record));
+  if (remaining.length === route.positions.length) return;
+
+  snapshotPolyline();
+  clearSelection();
+  route.positions = remaining;
+  updateMapFromPolyLine(route);
+  snapshotPolyline();
+}
+
+/**
+ * 将所选点位按原路线顺序复制到一条独立路线并切换过去。
+ */
+export function createRouteFromPoints(records) {
+  const source = polylines.value[selectedPolylineIndex.value];
+  if (!source || !map.value || !records.length) return false;
+
+  const selected = new Set(records);
+  const positions = JSON.parse(JSON.stringify(source.positions.filter((point) => selected.has(point))));
+  if (!positions.length) return false;
+
+  const name = '新路线';
+  const info = JSON.parse(JSON.stringify(source.info || {}));
+  info.name = name;
+  const route = {
+    name,
+    info,
+    tags: [...(source.tags || [])],
+    enable_monster_loot_split: !!source.enable_monster_loot_split,
+    map_match_method: source.map_match_method || '',
+    positions,
+    layer: L.polyline([], {...ROUTE_STYLE}).addTo(map.value),
+  };
+  for (const point of positions) {
+    delete point.locked;
+  }
+  route.layer.on('pm:edit', handleMapPointChange);
+  updateMapFromPolyLine(route);
+  polylines.value.push(route);
+  selectPolyline(polylines.value.length - 1);
+  return true;
+}
+
+/**
  * 执行下拉菜单里绑定的点位操作。
  */
 export function moreSelect(v) {
